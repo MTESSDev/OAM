@@ -1,9 +1,10 @@
 // TrayProcessWatcher.cs
-// Lance et surveille Agent.TrayClient.exe dans la session console active.
-// Le Service tournant en SYSTEM (Session 0) utilise WTSQueryUserToken +
-// CreateProcessAsUser pour injecter le processus dans la session de l'utilisateur.
+// Enumère toutes les sessions graphiques actives et s'assure qu'une instance
+// de TrayClient tourne dans chacune d'elles.
+// IMPORTANT : nécessite que le service tourne en LocalSystem (SE_TCB_NAME).
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -18,11 +19,16 @@ internal static class TrayProcessWatcher
 {
     // ── Win32 P/Invoke ───────────────────────────────────────────────────────
 
-    [DllImport("kernel32.dll")]
-    private static extern uint WTSGetActiveConsoleSessionId();
+    [DllImport("Wtsapi32.dll", SetLastError = true)]
+    private static extern bool WTSEnumerateSessions(
+        IntPtr hServer, uint reserved, uint version,
+        out IntPtr ppSessionInfo, out uint pCount);
 
     [DllImport("Wtsapi32.dll", SetLastError = true)]
     private static extern bool WTSQueryUserToken(uint sessionId, out IntPtr phToken);
+
+    [DllImport("Wtsapi32.dll")]
+    private static extern void WTSFreeMemory(IntPtr pMemory);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool DuplicateTokenEx(
@@ -41,140 +47,215 @@ internal static class TrayProcessWatcher
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
 
+    [DllImport("userenv.dll", SetLastError = true)]
+    private static extern bool CreateEnvironmentBlock(
+        out IntPtr lpEnvironment, IntPtr hToken, bool bInherit);
+
+    [DllImport("userenv.dll", SetLastError = true)]
+    private static extern bool DestroyEnvironmentBlock(IntPtr lpEnvironment);
+
+    // ── Structures ───────────────────────────────────────────────────────────
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WTS_SESSION_INFO
+    {
+        public uint   SessionId;
+        public IntPtr pWinStationName;
+        public int    State; // WTSActive = 0
+    }
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct STARTUPINFO
     {
-        public int cb;
+        public int     cb;
         public string? lpReserved, lpDesktop, lpTitle;
-        public uint dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars,
-                    dwFillAttribute, dwFlags;
-        public ushort wShowWindow, cbReserved2;
-        public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+        public uint    dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars,
+                       dwFillAttribute, dwFlags;
+        public ushort  wShowWindow, cbReserved2;
+        public IntPtr  lpReserved2, hStdInput, hStdOutput, hStdError;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct PROCESS_INFORMATION
     {
         public IntPtr hProcess, hThread;
-        public uint dwProcessId, dwThreadId;
+        public uint   dwProcessId, dwThreadId;
     }
 
-    private const uint TOKEN_ASSIGN_PRIMARY = 0x0001;
-    private const uint TOKEN_DUPLICATE      = 0x0002;
-    private const uint TOKEN_QUERY          = 0x0008;
-    private const uint NORMAL_PRIORITY_CLASS = 0x0020;
+    // ── Constantes ───────────────────────────────────────────────────────────
+
+    private const int    WTSActive               = 0;
+    private const uint   TOKEN_ASSIGN_PRIMARY    = 0x0001;
+    private const uint   TOKEN_DUPLICATE         = 0x0002;
+    private const uint   TOKEN_QUERY             = 0x0008;
+    private const uint   NORMAL_PRIORITY_CLASS   = 0x0020;
+    private const uint   CREATE_UNICODE_ENVIRONMENT = 0x0400;
+    private const uint   STARTF_USESHOWWINDOW    = 0x0001;
+    private const ushort SW_SHOWNORMAL           = 1;
+    private static readonly IntPtr WTS_CURRENT_SERVER = IntPtr.Zero;
 
     // ── API publique ─────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Boucle infinie : s'assure qu'une instance de TrayClient tourne toujours
-    /// dans la session console. Si le processus se termine (même tué par
-    /// l'utilisateur via le Gestionnaire des tâches), il est relancé après 2s.
+    /// Boucle principale : toutes les 5 s, s'assure qu'une instance de TrayClient
+    /// tourne dans chaque session utilisateur graphique active.
     /// </summary>
     public static async Task WatchAsync(string trayExePath, ILogger logger, CancellationToken token)
     {
+        string processName = Path.GetFileNameWithoutExtension(trayExePath);
+
         while (!token.IsCancellationRequested)
         {
-            Process? process = null;
             try
             {
                 if (!File.Exists(trayExePath))
                 {
                     logger.LogWarning("TrayClient introuvable : {Path}. Nouvelle tentative dans 10s.", trayExePath);
-                    await Task.Delay(10000, token);
+                    await Task.Delay(10_000, token);
                     continue;
                 }
 
-                process = LaunchInUserSession(trayExePath, logger);
-                if (process is null)
+                foreach (uint sessionId in GetActiveUserSessions(logger))
                 {
-                    // Aucune session active (ex. ouverture de session pas encore faite)
-                    await Task.Delay(5000, token);
-                    continue;
-                }
+                    if (IsTrayRunningInSession(processName, sessionId))
+                        continue;
 
-                logger.LogInformation("TrayClient lancé (PID {Pid}).", process.Id);
-                await process.WaitForExitAsync(token);
-                logger.LogWarning("TrayClient arrêté (code {Code}). Redémarrage dans 2s...",
-                    process.ExitCode);
+                    bool launched = LaunchInSession(trayExePath, sessionId, logger);
+                    if (launched)
+                        logger.LogInformation("TrayClient lancé dans la session {SessionId}.", sessionId);
+                }
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) { logger.LogError(ex, "Erreur surveillance TrayClient."); }
-            finally { process?.Dispose(); }
 
-            if (!token.IsCancellationRequested)
-                await Task.Delay(2000, token);
+            await Task.Delay(5_000, token);
         }
     }
 
-    // ── Lancement dans la session utilisateur ───────────────────────────────
+    // ── Sessions actives ─────────────────────────────────────────────────────
 
-    private static Process? LaunchInUserSession(string exePath, ILogger logger)
+    private static IEnumerable<uint> GetActiveUserSessions(ILogger logger)
     {
-        uint sessionId = WTSGetActiveConsoleSessionId();
-        if (sessionId == 0xFFFFFFFF)
+        if (!WTSEnumerateSessions(WTS_CURRENT_SERVER, 0, 1, out IntPtr pInfo, out uint count))
         {
-            logger.LogWarning("Aucune session console active (WTSGetActiveConsoleSessionId).");
-            return null;
-        }
-
-        if (!WTSQueryUserToken(sessionId, out IntPtr userToken))
-        {
-            // WTSQueryUserToken exige SE_TCB_NAME (SYSTEM uniquement).
-            // En debug / compte non-SYSTEM → fallback Process.Start dans la session courante.
-            logger.LogWarning(
-                "WTSQueryUserToken échoué (session {Id}, erreur Win32 {Err}). " +
-                "Fallback Process.Start (non-SYSTEM / debug).",
-                sessionId, Marshal.GetLastWin32Error());
-
-            return Process.Start(new ProcessStartInfo
-            {
-                FileName = exePath,
-                UseShellExecute = true
-            });
+            logger.LogWarning("WTSEnumerateSessions échoué (erreur Win32 {Err}).",
+                Marshal.GetLastWin32Error());
+            yield break;
         }
 
         try
         {
-            // DuplicateTokenEx : nécessaire pour obtenir un Primary Token utilisable
+            int size = Marshal.SizeOf<WTS_SESSION_INFO>();
+            for (uint i = 0; i < count; i++)
+            {
+                var info = Marshal.PtrToStructure<WTS_SESSION_INFO>(pInfo + (int)(i * size));
+
+                // WTSActive (0) = session avec un utilisateur connecté sur le bureau
+                if (info.State == WTSActive && info.SessionId != 0)
+                    yield return info.SessionId;
+            }
+        }
+        finally
+        {
+            WTSFreeMemory(pInfo);
+        }
+    }
+
+    // ── Vérification de présence ─────────────────────────────────────────────
+
+    private static bool IsTrayRunningInSession(string processName, uint sessionId)
+    {
+        foreach (var p in Process.GetProcessesByName(processName))
+        {
+            try
+            {
+                if ((uint)p.SessionId == sessionId)
+                    return true;
+            }
+            catch { /* processus déjà terminé */ }
+            finally { p.Dispose(); }
+        }
+        return false;
+    }
+
+    // ── Lancement dans une session utilisateur ───────────────────────────────
+
+    private static bool LaunchInSession(string exePath, uint sessionId, ILogger logger)
+    {
+        if (!WTSQueryUserToken(sessionId, out IntPtr userToken))
+        {
+            logger.LogWarning(
+                "WTSQueryUserToken échoué pour la session {Id} (erreur Win32 {Err}). " +
+                "Le service doit tourner en LocalSystem pour lancer des processus dans les sessions utilisateur.",
+                sessionId, Marshal.GetLastWin32Error());
+            return false;
+        }
+
+        try
+        {
             if (!DuplicateTokenEx(
                     userToken,
                     TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE | TOKEN_QUERY,
                     IntPtr.Zero,
-                    ImpersonationLevel: 2,   // SecurityImpersonation
-                    TokenType: 1,            // TokenPrimary
+                    ImpersonationLevel: 2,  // SecurityImpersonation
+                    TokenType: 1,           // TokenPrimary
                     out IntPtr primaryToken))
             {
-                logger.LogWarning("DuplicateTokenEx échoué (erreur Win32 {Err}).",
-                    Marshal.GetLastWin32Error());
-                return null;
+                logger.LogWarning("DuplicateTokenEx échoué pour la session {Id} (erreur Win32 {Err}).",
+                    sessionId, Marshal.GetLastWin32Error());
+                return false;
+            }
+
+            if (!CreateEnvironmentBlock(out IntPtr envBlock, primaryToken, false))
+            {
+                logger.LogWarning("CreateEnvironmentBlock échoué pour la session {Id} (erreur Win32 {Err}).",
+                    sessionId, Marshal.GetLastWin32Error());
+                envBlock = IntPtr.Zero;
             }
 
             try
             {
-                var si = new STARTUPINFO { cb = Marshal.SizeOf<STARTUPINFO>() };
+                var si = new STARTUPINFO
+                {
+                    cb          = Marshal.SizeOf<STARTUPINFO>(),
+                    lpDesktop   = "winsta0\\default",
+                    dwFlags     = STARTF_USESHOWWINDOW,
+                    wShowWindow = SW_SHOWNORMAL
+                };
+
+                uint creationFlags = NORMAL_PRIORITY_CLASS
+                    | (envBlock != IntPtr.Zero ? CREATE_UNICODE_ENVIRONMENT : 0);
+
                 bool ok = CreateProcessAsUser(
                     primaryToken,
                     exePath, null,
                     IntPtr.Zero, IntPtr.Zero,
                     bInheritHandles: false,
-                    NORMAL_PRIORITY_CLASS,
-                    IntPtr.Zero,
+                    creationFlags,
+                    envBlock,
                     Path.GetDirectoryName(exePath),
                     ref si, out var pi);
 
                 if (!ok)
                 {
-                    logger.LogWarning("CreateProcessAsUser échoué (erreur Win32 {Err}).",
-                        Marshal.GetLastWin32Error());
-                    return null;
+                    logger.LogWarning("CreateProcessAsUser échoué pour la session {Id} (erreur Win32 {Err}).",
+                        sessionId, Marshal.GetLastWin32Error());
+                    return false;
                 }
 
                 CloseHandle(pi.hThread);
-                return Process.GetProcessById((int)pi.dwProcessId);
+                CloseHandle(pi.hProcess);
+                return true;
             }
-            finally { CloseHandle(primaryToken); }
+            finally
+            {
+                if (envBlock != IntPtr.Zero) DestroyEnvironmentBlock(envBlock);
+                CloseHandle(primaryToken);
+            }
         }
-        finally { CloseHandle(userToken); }
+        finally
+        {
+            CloseHandle(userToken);
+        }
     }
 }
