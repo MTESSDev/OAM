@@ -1,0 +1,6 @@
+﻿################################################################################
+# Ce fichier .gitignore a été automatiquement créé par Microsoft(R) Visual Studio.
+################################################################################
+
+/.publish/Agent.Service/runtimes/win/lib/net10.0
+/.publish/Agent.Service
