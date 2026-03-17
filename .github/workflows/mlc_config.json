@@ -1,0 +1,10 @@
+{
+  "ignorePatterns": [
+    {
+      "pattern": "^https://code.visualstudio.com"
+    },
+       {
+      "pattern": "^https://design.quebec.ca"
+    }
+  ]
+}
