@@ -37,7 +37,10 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Point d'entrée SignalR — doit correspondre à l'URL dans appsettings.json des clients
-app.MapHub<AgentHub>("/hub");
+// Agent.Service (LocalSystem, anonyme)
+app.MapHub<AgentHub>("/hub/agent");
+
+// Agent.TrayClient (Windows Auth — challenge Negotiate à la connexion)
+app.MapHub<UserHub>("/hub/user").RequireAuthorization();
 
 app.Run();

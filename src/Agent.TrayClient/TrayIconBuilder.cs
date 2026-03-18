@@ -70,12 +70,12 @@ internal static class TrayIconBuilder
             ? Color.FromArgb(0, 200, 83)   // vert
             : Color.FromArgb(229, 57, 53);  // rouge
 
-        const int DotSize = 10;
+        const int DotSize = 12;
         int x = 32 - DotSize - 1;
         int y = 32 - DotSize - 1;
 
         // Contour blanc pour la lisibilité
-        g.FillEllipse(Brushes.White, x - 1, y - 1, DotSize + 2, DotSize + 2);
+        g.FillEllipse(Brushes.Black, x - 2, y - 2, DotSize + 3, DotSize + 3);
         using var brush = new SolidBrush(dotColor);
         g.FillEllipse(brush, x, y, DotSize, DotSize);
 

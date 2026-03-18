@@ -12,12 +12,17 @@ namespace Agent.Server.Controllers;
 [Route("api/[controller]")]
 public class AgentsController : ControllerBase
 {
-    private readonly IHubContext<AgentHub> _hub;
+    private readonly IHubContext<AgentHub> _agentHub;
+    private readonly IHubContext<UserHub>  _userHub;
     private readonly IAgentRegistry _registry;
 
-    public AgentsController(IHubContext<AgentHub> hub, IAgentRegistry registry)
+    public AgentsController(
+        IHubContext<AgentHub> agentHub,
+        IHubContext<UserHub>  userHub,
+        IAgentRegistry registry)
     {
-        _hub      = hub;
+        _agentHub = agentHub;
+        _userHub  = userHub;
         _registry = registry;
     }
 
@@ -37,7 +42,7 @@ public class AgentsController : ControllerBase
     [HttpPost("openurl")]
     public async Task<IActionResult> OpenUrl([FromBody] OpenUrlRequest request)
     {
-        await _hub.Clients.Group("users").SendAsync("OpenUrl", request.Url);
+        await _userHub.Clients.Group("users").SendAsync("OpenUrl", request.Url);
         return Ok(new { sent = true, target = "all-users" });
     }
 
@@ -45,7 +50,7 @@ public class AgentsController : ControllerBase
     [HttpPost("checkupdate")]
     public async Task<IActionResult> CheckUpdate()
     {
-        await _hub.Clients.Group("agents").SendAsync("CheckUpdate");
+        await _agentHub.Clients.Group("agents").SendAsync("CheckUpdate");
         return Ok(new { sent = true, target = "all-agents" });
     }
 
@@ -53,7 +58,6 @@ public class AgentsController : ControllerBase
 
     /// <summary>
     /// Ouvre une URL sur tous les TrayClients connectés depuis une machine spécifique.
-    /// Cible les utilisateurs (sessions ouvertes) et non le service machine.
     /// </summary>
     [HttpPost("{machineName}/openurl")]
     public async Task<IActionResult> OpenUrl(string machineName, [FromBody] OpenUrlRequest request)
@@ -62,7 +66,7 @@ public class AgentsController : ControllerBase
         if (!connectionIds.Any())
             return NotFound(new { error = $"Aucun utilisateur connecté sur '{machineName}'." });
 
-        await _hub.Clients.Clients(connectionIds).SendAsync("OpenUrl", request.Url);
+        await _userHub.Clients.Clients(connectionIds).SendAsync("OpenUrl", request.Url);
         return Ok(new { sent = true, target = machineName, sessions = connectionIds.Count });
     }
 
@@ -74,7 +78,7 @@ public class AgentsController : ControllerBase
         if (connId is null)
             return NotFound(new { error = $"Agent '{machineName}' non connecté." });
 
-        await _hub.Clients.Client(connId).SendAsync("CheckUpdate");
+        await _agentHub.Clients.Client(connId).SendAsync("CheckUpdate");
         return Ok(new { sent = true, target = machineName });
     }
 }
