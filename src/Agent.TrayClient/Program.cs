@@ -1,11 +1,10 @@
 // Program.cs (WinForms)
-// Configurer le projet en OutputType: WinExe
-using Agent.Shared;
+using Microsoft.AspNetCore.SignalR.Client;
 using System;
 using System.Diagnostics;
-using System.Drawing;
 using System.IO;
-using System.IO.Pipes;
+using System.Reflection;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -17,7 +16,6 @@ static class Program
     {
         ApplicationConfiguration.Initialize();
 
-        // S'assurer qu'une seule instance tourne
         using var mutex = new Mutex(true, "MonAppTrayClient", out bool createdNew);
         if (!createdNew) return;
 
@@ -27,87 +25,136 @@ static class Program
 
 public class MyTrayContext : ApplicationContext
 {
-    private NotifyIcon _trayIcon;
-    private CancellationTokenSource _cts = new();
+    private readonly NotifyIcon _trayIcon;
+    private readonly CancellationTokenSource _cts = new();
+    private readonly HubConnection? _hubConnection;
+    // Control caché pour invoquer sur le thread UI — plus fiable que SynchronizationContext
+    // dans un tray app sans fenêtre principale (Current peut être null avant Application.Run)
+    private readonly Control _uiInvoker = new();
+    private System.Drawing.Icon? _currentIcon;
 
     public MyTrayContext()
     {
+        // Forcer la création du handle Win32 pour que BeginInvoke soit disponible
+        // avant que le message loop soit démarré
+        _ = _uiInvoker.Handle;
+
         _trayIcon = new NotifyIcon()
         {
-            Icon = SystemIcons.Application, // Mettre ta propre ic�ne
             Visible = true,
-            Text = "Mon Service Sécurisé"
+            Text    = "Mon Service — Déconnecté"
         };
 
-        // Menu contextuel — pas de "Quitter" : le Service gère le cycle de vie
         var menu = new ContextMenuStrip();
         menu.Items.Add("Ouvrir le portail", null, (s, e) => OpenBrowser("https://mon-portail"));
         _trayIcon.ContextMenuStrip = menu;
 
-        // D�marrer l'�coute du service en arri�re-plan
-        Task.Run(() => ListenToService(_cts.Token));
+        // Icône initiale : rouge (pas encore connecté)
+        SetIconAsync(ConnectionStatus.Disconnected);
 
-        // S'assurer du d�marrage auto (Registry)
-        EnsureStartup();
+        string? hubUrl = ReadHubUrl();
+        if (hubUrl is not null)
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(hubUrl, options =>
+                {
+                    // Envoie automatiquement les credentials Windows de l'utilisateur courant
+                    options.UseDefaultCredentials = true;
+                })
+                .Build();
+
+            _hubConnection.On<string>("OpenUrl", url => OpenBrowser(url));
+
+            // Mettre le point rouge dès que SignalR coupe
+            _hubConnection.Closed += _ =>
+            {
+                SetIconAsync(ConnectionStatus.Disconnected);
+                return Task.CompletedTask;
+            };
+
+            Task.Run(() => ConnectSignalRAsync(_cts.Token));
+        }
+
+        //EnsureStartup();
     }
 
-    private async Task ListenToService(CancellationToken token)
+    // ── Connexion SignalR ────────────────────────────────────────────────────
+
+    private async Task ConnectSignalRAsync(CancellationToken token)
     {
         while (!token.IsCancellationRequested)
         {
             try
             {
-                using var client = new NamedPipeClientStream(".", AppConstants.PipeName, PipeDirection.In);
-                await client.ConnectAsync(token);
-
-                using var reader = new BinaryReader(client);
-                while (client.IsConnected && !token.IsCancellationRequested)
+                if (_hubConnection!.State == HubConnectionState.Disconnected)
                 {
-                    // Lecture bloquante, attend un ordre du service
-                    byte command = reader.ReadByte();
-
-                    if (command == AppConstants.CommandOpenUrl)
-                    {
-                        string url = reader.ReadString();
-                        // IMPORTANT : Ex�cuter sur le thread UI ou ThreadPool
-                        OpenBrowser(url);
-                    }
+                    await _hubConnection.StartAsync(token);
+                    await _hubConnection.InvokeAsync("RegisterUser", Environment.MachineName, token);
+                    SetIconAsync(ConnectionStatus.Connected);
                 }
+
+                await Task.Delay(5_000, token);
             }
+            catch (OperationCanceledException) { break; }
             catch
             {
-                // Si le service n'est pas l� ou red�marre (update), on attend un peu
-                await Task.Delay(2000, token);
+                await _hubConnection!.StopAsync(token);
+                SetIconAsync(ConnectionStatus.Disconnected);
+                try { await Task.Delay(10_000, token); }
+                catch (OperationCanceledException) { break; }
             }
         }
     }
 
-    private void OpenBrowser(string url)
+    // ── Mise à jour de l'icône ───────────────────────────────────────────────
+
+    private void SetIconAsync(ConnectionStatus status)
+    {
+        _ = Task.Run(async () =>
+        {
+            var newIcon = await TrayIconBuilder.BuildAsync(status);
+
+            _uiInvoker.BeginInvoke(() =>
+            {
+                var old = _currentIcon;
+                _currentIcon   = newIcon;
+                _trayIcon.Icon = newIcon;
+                _trayIcon.Text = status == ConnectionStatus.Connected
+                    ? "Mon Service — Connecté"
+                    : "Mon Service — Déconnecté";
+                old?.Dispose();
+            });
+        });
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private static string? ReadHubUrl()
     {
         try
         {
-            // M�thode la plus rapide et compatible .NET Core pour ouvrir l'URL par d�faut
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = url,
-                UseShellExecute = true
-            });
+            string path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+            if (!File.Exists(path)) return null;
+            return JsonNode.Parse(File.ReadAllText(path))?["Agent"]?["HubUrl"]?.GetValue<string>();
         }
-        catch (Exception ex) { /* Log */ }
+        catch { return null; }
+    }
+
+    private static void OpenBrowser(string url)
+    {
+        try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); }
+        catch { }
     }
 
     private static void EnsureStartup()
     {
         const string registryKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        const string appName = "MonServiceSecureTray";
-        string exePath = System.Reflection.Assembly.GetExecutingAssembly().Location
+        const string appName     = "MonServiceSecureTray";
+        string exePath = Assembly.GetExecutingAssembly().Location
             .Replace(".dll", ".exe", StringComparison.OrdinalIgnoreCase);
 
         using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(registryKey, writable: true);
         if (key?.GetValue(appName) as string != exePath)
             key?.SetValue(appName, exePath);
     }
-
-    // Exit() supprimé volontairement : l'utilisateur ne peut pas fermer le tray.
-    // Le Service (SYSTEM) gère le cycle de vie via TrayProcessWatcher.
 }

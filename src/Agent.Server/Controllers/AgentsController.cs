@@ -3,6 +3,7 @@ using Agent.Server.Hubs;
 using Agent.Server.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace Agent.Server.Controllers;
@@ -16,49 +17,56 @@ public class AgentsController : ControllerBase
 
     public AgentsController(IHubContext<AgentHub> hub, IAgentRegistry registry)
     {
-        _hub = hub;
+        _hub      = hub;
         _registry = registry;
     }
 
     // ── Consultation ─────────────────────────────────────────────────────────
 
-    /// <summary>Liste tous les agents actuellement connectés.</summary>
+    /// <summary>Liste toutes les machines (Agent.Service) connectées.</summary>
     [HttpGet]
     public IActionResult GetAll() => Ok(_registry.GetAll());
 
-    // ── Commandes broadcast (tous les agents) ────────────────────────────────
+    /// <summary>Liste tous les utilisateurs (Agent.TrayClient) connectés.</summary>
+    [HttpGet("users")]
+    public IActionResult GetAllUsers() => Ok(_registry.GetAllUsers());
 
-    /// <summary>Ouvre une URL sur tous les agents connectés.</summary>
+    // ── Commandes broadcast (tous les utilisateurs) ──────────────────────────
+
+    /// <summary>Ouvre une URL sur tous les TrayClients connectés.</summary>
     [HttpPost("openurl")]
     public async Task<IActionResult> OpenUrl([FromBody] OpenUrlRequest request)
     {
-        await _hub.Clients.Group("agents").SendAsync("OpenUrl", request.Url);
-        return Ok(new { sent = true, target = "all" });
+        await _hub.Clients.Group("users").SendAsync("OpenUrl", request.Url);
+        return Ok(new { sent = true, target = "all-users" });
     }
 
-    /// <summary>Déclenche une vérification de mise à jour sur tous les agents.</summary>
+    /// <summary>Déclenche une vérification de mise à jour sur toutes les machines.</summary>
     [HttpPost("checkupdate")]
     public async Task<IActionResult> CheckUpdate()
     {
         await _hub.Clients.Group("agents").SendAsync("CheckUpdate");
-        return Ok(new { sent = true, target = "all" });
+        return Ok(new { sent = true, target = "all-agents" });
     }
 
-    // ── Commandes ciblées (un seul agent par nom de machine) ─────────────────
+    // ── Commandes ciblées par machine ────────────────────────────────────────
 
-    /// <summary>Ouvre une URL sur un agent spécifique.</summary>
+    /// <summary>
+    /// Ouvre une URL sur tous les TrayClients connectés depuis une machine spécifique.
+    /// Cible les utilisateurs (sessions ouvertes) et non le service machine.
+    /// </summary>
     [HttpPost("{machineName}/openurl")]
     public async Task<IActionResult> OpenUrl(string machineName, [FromBody] OpenUrlRequest request)
     {
-        var connId = _registry.GetConnectionId(machineName);
-        if (connId is null)
-            return NotFound(new { error = $"Agent '{machineName}' non connecté." });
+        var connectionIds = _registry.GetUserConnectionIdsByMachine(machineName);
+        if (!connectionIds.Any())
+            return NotFound(new { error = $"Aucun utilisateur connecté sur '{machineName}'." });
 
-        await _hub.Clients.Client(connId).SendAsync("OpenUrl", request.Url);
-        return Ok(new { sent = true, target = machineName });
+        await _hub.Clients.Clients(connectionIds).SendAsync("OpenUrl", request.Url);
+        return Ok(new { sent = true, target = machineName, sessions = connectionIds.Count });
     }
 
-    /// <summary>Déclenche une mise à jour sur un agent spécifique.</summary>
+    /// <summary>Déclenche une mise à jour sur une machine spécifique.</summary>
     [HttpPost("{machineName}/checkupdate")]
     public async Task<IActionResult> CheckUpdate(string machineName)
     {

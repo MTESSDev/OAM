@@ -14,11 +14,15 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ── Configuration ──────────────────────────────────────────────────────────
-$ServiceName = "MonServiceSecure"
-$ServiceDesc = "Agent OAM - Surveillance et mise a jour"
-$ProjectPath = Join-Path $PSScriptRoot "src\Agent.Service"
-$PublishDir  = Join-Path $PSScriptRoot ".publish\Agent.Service"
-$ExePath     = Join-Path $PublishDir "Agent.Service.exe"
+$ServiceName        = "MonServiceSecure"
+$ServiceDesc        = "Agent OAM - Surveillance et mise a jour"
+$ServiceProjectPath = Join-Path $PSScriptRoot "src\Agent.Service"
+$TrayProjectPath    = Join-Path $PSScriptRoot "src\Agent.TrayClient"
+$PublishDir         = Join-Path $PSScriptRoot ".publish\Agent.Service"
+$TrayPublishDir     = Join-Path $PublishDir "tray"
+$ExePath            = Join-Path $PublishDir "Agent.Service.exe"
+$TrayExePath        = Join-Path $TrayPublishDir "Agent.TrayClient.exe"
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 function Write-Header($text) {
@@ -44,22 +48,51 @@ function Invoke-Build {
         Remove-Item $PublishDir -Recurse -Force
     }
 
-    dotnet publish $ProjectPath `
+    # 1. Publier Agent.Service
+    Write-INF "Publication Agent.Service..."
+    dotnet publish $ServiceProjectPath `
         --configuration Release `
         --output $PublishDir `
         --self-contained false
 
     if ($LASTEXITCODE -ne 0) {
-        Write-ERR "La publication a echoue (code $LASTEXITCODE)."
+        Write-ERR "Publication Agent.Service echouee (code $LASTEXITCODE)."
+        exit 1
+    }
+
+    # 2. Publier Agent.TrayClient dans un sous-dossier tray\
+    # Evite que son appsettings.json ecrase celui du Service
+    Write-INF "Publication Agent.TrayClient..."
+    dotnet publish $TrayProjectPath `
+        --configuration Release `
+        --output $TrayPublishDir `
+        --self-contained false
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-ERR "Publication Agent.TrayClient echouee (code $LASTEXITCODE)."
         exit 1
     }
 
     if (-not (Test-Path $ExePath)) {
-        Write-ERR "L'executable n'a pas ete trouve apres la publication : $ExePath"
+        Write-ERR "Agent.Service.exe introuvable apres publication : $ExePath"
         exit 1
     }
 
+    if (-not (Test-Path $TrayExePath)) {
+        Write-ERR "Agent.TrayClient.exe introuvable apres publication : $TrayExePath"
+        exit 1
+    }
+
+    # 3. Mettre a jour TrayClientPath dans l'appsettings.json publie du Service
+    $appSettingsPath = Join-Path $PublishDir "appsettings.json"
+    $json = Get-Content $appSettingsPath -Raw | ConvertFrom-Json
+    $json.Agent.TrayClientPath = $TrayExePath
+    $json | ConvertTo-Json -Depth 5 | Set-Content $appSettingsPath -Encoding UTF8
+    Write-INF "TrayClientPath mis a jour : $TrayExePath"
+
     Write-OK "Publication reussie."
+    Write-INF "  Service    : $PublishDir"
+    Write-INF "  TrayClient : $TrayPublishDir"
 }
 
 function Invoke-Install {

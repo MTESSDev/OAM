@@ -4,3 +4,4 @@
 
 /.publish/Agent.Service/runtimes/win/lib/net10.0
 /.publish/Agent.Service
+.claude/settings.local.json
