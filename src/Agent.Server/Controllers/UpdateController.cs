@@ -3,6 +3,7 @@ using Agent.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using System;
+using System.IO;
 
 namespace Agent.Server.Controllers;
 
@@ -35,8 +36,28 @@ public class UpdateController : ControllerBase
         return Ok(new
         {
             hasUpdate = true,
-            update = new UpdateInfo(_manifest.LatestVersion, _manifest.DownloadUrl, _manifest.Hash)
+            update    = new UpdateInfo(_manifest.LatestVersion, _manifest.DownloadUrl, _manifest.Hash)
         });
+    }
+
+    /// <summary>
+    /// Sert le fichier ZIP de mise à jour depuis le dossier local "updates/".
+    /// GET /updates/download/agent-1.0.1.zip
+    /// </summary>
+    [HttpGet("download/{filename}")]
+    public IActionResult Download(string filename)
+    {
+        // Sécurité : rejeter tout chemin qui sort du dossier updates/
+        if (filename.Contains('/') || filename.Contains('\\') || filename.Contains(".."))
+            return BadRequest(new { error = "Nom de fichier invalide." });
+
+        string updatesDir = Path.Combine(AppContext.BaseDirectory, "updates");
+        string filePath   = Path.Combine(updatesDir, filename);
+
+        if (!System.IO.File.Exists(filePath))
+            return NotFound(new { error = $"Fichier '{filename}' introuvable." });
+
+        return PhysicalFile(filePath, "application/zip", filename);
     }
 }
 
@@ -44,6 +65,6 @@ public class UpdateController : ControllerBase
 public sealed class UpdateManifestConfig
 {
     public string LatestVersion { get; init; } = "1.0.0";
-    public string DownloadUrl { get; init; } = string.Empty;
-    public string Hash { get; init; } = string.Empty;
+    public string DownloadUrl   { get; init; } = string.Empty;
+    public string Hash          { get; init; } = string.Empty;
 }

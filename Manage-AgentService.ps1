@@ -6,7 +6,7 @@
     Build, installation, demarrage, arret, suppression et consultation des logs.
 #>
 param(
-    [ValidateSet("install","build","start","stop","reinstall","uninstall","status","logs","")]
+    [ValidateSet("install","build","start","stop","reinstall","uninstall","status","logs","make-update","")]
     [string]$Action = ""
 )
 
@@ -14,14 +14,16 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ── Configuration ──────────────────────────────────────────────────────────
-$ServiceName        = "MonServiceSecure"
-$ServiceDesc        = "Agent OAM - Surveillance et mise a jour"
-$ServiceProjectPath = Join-Path $PSScriptRoot "src\Agent.Service"
-$TrayProjectPath    = Join-Path $PSScriptRoot "src\Agent.TrayClient"
-$PublishDir         = Join-Path $PSScriptRoot ".publish\Agent.Service"
-$TrayPublishDir     = Join-Path $PublishDir "tray"
-$ExePath            = Join-Path $PublishDir "Agent.Service.exe"
-$TrayExePath        = Join-Path $TrayPublishDir "Agent.TrayClient.exe"
+$ServiceName          = "MonServiceSecure"
+$ServiceDesc          = "Agent OAM - Surveillance et mise a jour"
+$ServiceProjectPath   = Join-Path $PSScriptRoot "src\Agent.Service"
+$TrayProjectPath      = Join-Path $PSScriptRoot "src\Agent.TrayClient"
+$UpdaterProjectPath   = Join-Path $PSScriptRoot "src\Agent.Updater"
+$PublishDir           = Join-Path $PSScriptRoot ".publish\Agent.Service"
+$TrayPublishDir       = Join-Path $PublishDir "tray"
+$ExePath              = Join-Path $PublishDir "Agent.Service.exe"
+$TrayExePath          = Join-Path $TrayPublishDir "Agent.TrayClient.exe"
+$UpdatePackageDir     = Join-Path $PSScriptRoot ".publish\update-package"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -73,6 +75,18 @@ function Invoke-Build {
         exit 1
     }
 
+    # 3. Publier Agent.Updater dans le meme dossier que le Service
+    Write-INF "Publication Agent.Updater..."
+    dotnet publish $UpdaterProjectPath `
+        --configuration Release `
+        --output $PublishDir `
+        --self-contained false
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-ERR "Publication Agent.Updater echouee (code $LASTEXITCODE)."
+        exit 1
+    }
+
     if (-not (Test-Path $ExePath)) {
         Write-ERR "Agent.Service.exe introuvable apres publication : $ExePath"
         exit 1
@@ -82,13 +96,6 @@ function Invoke-Build {
         Write-ERR "Agent.TrayClient.exe introuvable apres publication : $TrayExePath"
         exit 1
     }
-
-    # 3. Mettre a jour TrayClientPath dans l'appsettings.json publie du Service
-    $appSettingsPath = Join-Path $PublishDir "appsettings.json"
-    $json = Get-Content $appSettingsPath -Raw | ConvertFrom-Json
-    $json.Agent.TrayClientPath = $TrayExePath
-    $json | ConvertTo-Json -Depth 5 | Set-Content $appSettingsPath -Encoding UTF8
-    Write-INF "TrayClientPath mis a jour : $TrayExePath"
 
     Write-OK "Publication reussie."
     Write-INF "  Service    : $PublishDir"
@@ -217,6 +224,61 @@ function Invoke-Logs {
     }
 }
 
+function Invoke-MakeUpdate {
+    Write-Header "Creation du package de mise a jour"
+
+    # 1. Publier tous les composants dans un dossier temporaire
+    if (Test-Path $UpdatePackageDir) { Remove-Item $UpdatePackageDir -Recurse -Force }
+
+    Write-INF "Publication Agent.Service..."
+    dotnet publish $ServiceProjectPath --configuration Release --output $UpdatePackageDir --self-contained false
+    if ($LASTEXITCODE -ne 0) { Write-ERR "Publication echouee."; exit 1 }
+
+    Write-INF "Publication Agent.TrayClient..."
+    $updateTrayDir = Join-Path $UpdatePackageDir "tray"
+    dotnet publish $TrayProjectPath --configuration Release --output $updateTrayDir --self-contained false
+    if ($LASTEXITCODE -ne 0) { Write-ERR "Publication echouee."; exit 1 }
+
+    Write-INF "Publication Agent.Updater..."
+    dotnet publish $UpdaterProjectPath --configuration Release --output $UpdatePackageDir --self-contained false
+    if ($LASTEXITCODE -ne 0) { Write-ERR "Publication echouee."; exit 1 }
+
+    # 2. Lire la version dans le binaire publie
+    $serviceExe = Join-Path $UpdatePackageDir "Agent.Service.exe"
+    $newVersion  = (Get-Item $serviceExe).VersionInfo.ProductVersion
+    if ([string]::IsNullOrWhiteSpace($newVersion)) { $newVersion = "1.0.0" }
+    Write-INF "Version du package : $newVersion"
+
+    # 3. Creer le ZIP
+    $zipName = "agent-$newVersion.zip"
+    $zipPath = Join-Path $PSScriptRoot ".publish\$zipName"
+    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    Compress-Archive -Path "$UpdatePackageDir\*" -DestinationPath $zipPath
+    Write-OK "ZIP cree : $zipPath"
+
+    # 4. Calculer le SHA-256
+    $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
+    Write-OK "SHA-256  : $hash"
+
+    # 5. Copier le ZIP dans le dossier updates\ du serveur publie
+    $serverUpdateDir = Join-Path $PSScriptRoot ".publish\Agent.Server\updates"
+    if (-not (Test-Path $serverUpdateDir)) { New-Item -ItemType Directory -Path $serverUpdateDir | Out-Null }
+    Copy-Item $zipPath $serverUpdateDir -Force
+    Write-OK "ZIP copie dans : $serverUpdateDir"
+
+    # 6. Afficher ce qu'il faut mettre dans appsettings.json du serveur
+    Write-Host ""
+    Write-Host "---------------------------------------------------" -ForegroundColor Green
+    Write-Host " Mets a jour appsettings.json du serveur :" -ForegroundColor Green
+    Write-Host "---------------------------------------------------" -ForegroundColor Green
+    Write-Host "  `"Update`": {" -ForegroundColor White
+    Write-Host "    `"LatestVersion`": `"$newVersion`"," -ForegroundColor Yellow
+    Write-Host "    `"DownloadUrl`": `"https://localhost:5001/updates/download/$zipName`"," -ForegroundColor Yellow
+    Write-Host "    `"Hash`": `"$hash`"" -ForegroundColor Yellow
+    Write-Host "  }" -ForegroundColor White
+    Write-Host "---------------------------------------------------" -ForegroundColor Green
+}
+
 function Invoke-Reinstall {
     Invoke-Build
     Invoke-Uninstall
@@ -240,6 +302,7 @@ function Show-Menu {
     Write-Host "  7. Desinstaller"
     Write-Host "  8. Statut"
     Write-Host "  9. Voir les logs (50 derniers)"
+    Write-Host "  U. Creer package de mise a jour (make-update)"
     Write-Host "  Q. Quitter"
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Write-Host ""
@@ -254,7 +317,8 @@ switch ($Action.ToLower()) {
     "reinstall" { Invoke-Reinstall }
     "uninstall" { Invoke-Uninstall }
     "status"    { Invoke-Status }
-    "logs"      { Invoke-Logs }
+    "logs"        { Invoke-Logs }
+    "make-update" { Invoke-MakeUpdate }
     default {
         do {
             Show-Menu
@@ -269,10 +333,13 @@ switch ($Action.ToLower()) {
                 "7" { Invoke-Uninstall }
                 "8" { Invoke-Status }
                 "9" { Invoke-Logs }
+                "U" { Invoke-MakeUpdate }
+                "u" { Invoke-MakeUpdate }
                 "Q" { Write-Host "Au revoir." -ForegroundColor Cyan }
                 "q" { Write-Host "Au revoir." -ForegroundColor Cyan }
                 default { Write-INF "Choix invalide." }
             }
         } while ($choice -ne "Q" -and $choice -ne "q")
+
     }
 }
