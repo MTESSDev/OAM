@@ -1,9 +1,10 @@
-// Program.cs (WinForms)
+// Program.cs (WinForms + WPF tray application)
+using Agent.TrayClient;
 using Microsoft.AspNetCore.SignalR.Client;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Reflection;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,21 +20,33 @@ static class Program
         using var mutex = new Mutex(true, "MonAppTrayClient", out bool createdNew);
         if (!createdNew) return;
 
+        // Initialiser l'Application WPF avant de lancer la boucle WinForms.
+        // Sans cette ligne, les fenêtres WPF n'ont pas accès aux ressources/thèmes WPF.
+        // ShutdownMode.OnExplicitShutdown empêche WPF d'arrêter le process tout seul.
+        _ = new System.Windows.Application
+        {
+            ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown,
+        };
+
         Application.Run(new MyTrayContext());
     }
 }
 
 public class MyTrayContext : ApplicationContext
 {
-    private readonly NotifyIcon _trayIcon;
+    private readonly NotifyIcon  _trayIcon;
     private readonly CancellationTokenSource _cts = new();
-    private readonly HubConnection? _hubConnection;
-    // Control caché pour invoquer sur le thread UI — plus fiable que SynchronizationContext
-    // dans un tray app sans fenêtre principale (Current peut être null avant Application.Run)
+    private readonly HubConnection?  _hubConnection;
+    private readonly HotkeyManager   _hotkey;
+    private readonly SearchService   _searchService;
+    // Control caché pour invoquer sur le thread UI (SynchronizationContext peut être null
+    // dans un tray app sans fenêtre principale avant Application.Run)
     private readonly Control _uiInvoker = new();
     private System.Drawing.Icon? _currentIcon;
     // Annulé à chaque changement réseau pour déclencher une reconnexion immédiate
     private CancellationTokenSource _networkChangeCts = new();
+    // Fenêtre palette — une seule instance à la fois
+    private System.Windows.Window? _palette;
 
     public MyTrayContext()
     {
@@ -41,6 +54,7 @@ public class MyTrayContext : ApplicationContext
         // avant que le message loop soit démarré
         _ = _uiInvoker.Handle;
 
+        // ── Icône tray ───────────────────────────────────────────────────────
         _trayIcon = new NotifyIcon()
         {
             Visible = true,
@@ -48,13 +62,26 @@ public class MyTrayContext : ApplicationContext
         };
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Ouvrir le portail", null, (s, e) => OpenBrowser("https://mon-portail"));
+        menu.Items.Add("Recherche  (Ctrl+Win+Alt+Espace)", null, (_, _) => ShowPalette());
+        menu.Items.Add("Ouvrir le portail", null,
+            (_, _) => OpenBrowser(ReadConfig("Agent:PortalUrl") ?? "https://mon-portail"));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Quitter", null, (_, _) => ExitApp());
         _trayIcon.ContextMenuStrip = menu;
+        _trayIcon.DoubleClick += (_, _) => ShowPalette();
 
         // Icône initiale : rouge (pas encore connecté)
         SetIconAsync(ConnectionStatus.Disconnected);
 
-        string? hubUrl = ReadHubUrl();
+        // ── Raccourci global ─────────────────────────────────────────────────
+        _hotkey = new HotkeyManager();
+        _hotkey.Pressed += (_, _) => ShowPalette();
+
+        // ── Service de recherche ─────────────────────────────────────────────
+        _searchService = BuildSearchService();
+
+        // ── SignalR ──────────────────────────────────────────────────────────
+        string? hubUrl = ReadConfig("Agent:HubUrl");
         if (hubUrl is not null)
         {
             _hubConnection = new HubConnectionBuilder()
@@ -79,8 +106,51 @@ public class MyTrayContext : ApplicationContext
 
             Task.Run(() => ConnectSignalRAsync(_cts.Token));
         }
+    }
 
-        //EnsureStartup();
+    // ── Palette de recherche ─────────────────────────────────────────────────
+
+    private void ShowPalette()
+    {
+        // Si la fenêtre est déjà ouverte, l'amener au premier plan
+        if (_palette is { IsVisible: true })
+        {
+            _palette.Activate();
+            return;
+        }
+
+        _palette = new PaletteWindow(_searchService);
+        _palette.Closed += (_, _) => _palette = null;
+        _palette.Show();
+    }
+
+    private void ExitApp()
+    {
+        _cts.Cancel();
+        _hotkey.Dispose();
+        _trayIcon.Visible = false;
+        System.Windows.Application.Current?.Shutdown();
+        Application.Exit();
+    }
+
+    // ── Construction du service de recherche ─────────────────────────────────
+
+    private SearchService BuildSearchService()
+    {
+        var sources    = new List<ISearchSource>();
+        var gedUrl     = ReadConfig("Search:GedUrl");
+        var oamUrl     = ReadConfig("Search:OamUrl");
+
+        if (!string.IsNullOrWhiteSpace(gedUrl)) sources.Add(new GedSearchSource(gedUrl!));
+        if (!string.IsNullOrWhiteSpace(oamUrl)) sources.Add(new OamSearchSource(oamUrl!));
+
+        int timeoutSec = int.TryParse(ReadConfig("Search:TimeoutSeconds"), out var t) ? t : 2;
+        int cacheSec   = int.TryParse(ReadConfig("Search:CacheSeconds"),   out var c) ? c : 30;
+
+        return new SearchService(
+            sources,
+            TimeSpan.FromSeconds(timeoutSec),
+            TimeSpan.FromSeconds(cacheSec));
     }
 
     // ── Connexion SignalR ────────────────────────────────────────────────────
@@ -168,13 +238,16 @@ public class MyTrayContext : ApplicationContext
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private static string? ReadHubUrl()
+    private static string? ReadConfig(string key)
     {
         try
         {
             string path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
             if (!File.Exists(path)) return null;
-            return JsonNode.Parse(File.ReadAllText(path))?["Agent"]?["HubUrl"]?.GetValue<string>();
+            JsonNode? node = JsonNode.Parse(File.ReadAllText(path));
+            foreach (var part in key.Split(':'))
+                node = node?[part];
+            return node?.GetValue<string>();
         }
         catch { return null; }
     }
@@ -183,17 +256,5 @@ public class MyTrayContext : ApplicationContext
     {
         try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); }
         catch { }
-    }
-
-    private static void EnsureStartup()
-    {
-        const string registryKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        const string appName     = "MonServiceSecureTray";
-        string exePath = Assembly.GetExecutingAssembly().Location
-            .Replace(".dll", ".exe", StringComparison.OrdinalIgnoreCase);
-
-        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(registryKey, writable: true);
-        if (key?.GetValue(appName) as string != exePath)
-            key?.SetValue(appName, exePath);
     }
 }
