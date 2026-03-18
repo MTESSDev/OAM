@@ -1,4 +1,4 @@
-# Dossier de sécurité — OAM (Outil d'Aide aux Agents)
+# Dossier de sécurité — OAM (Outil d'Aide à la Mission)
 
 > **Objet :** Approbation de déploiement via trousse SMS Microsoft\
 > **Destinataire :** Équipe de sécurité informatique\
@@ -41,9 +41,7 @@ L'agent se manifeste sur le poste par une **icône dans la zone de notification*
                        │ HTTPS (5001)
                        ▼
 ┌───────────── SERVEUR INTERNE (Agent.Server) ─────────────────────────┐
-│  · Hub SignalR /hub/agent  (anonyme, pour Agent.Service)              │
 │  · Hub SignalR /hub/user   (Windows Auth, pour Agent.TrayClient)      │
-│  · API REST /api/agents    (gestion par les administrateurs)          │
 │  · API REST /updates/      (distribution des mises à jour)            │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -66,18 +64,17 @@ L'agent se manifeste sur le poste par une **icône dans la zone de notification*
 
 Le service Windows s'exécute dans la **session 0**, une session système isolée des sessions utilisateur graphiques par Windows. Pour lancer l'icône de notification dans la session de l'utilisateur connecté, le service doit :
 
-1. **Énumérer les sessions actives** via `WTSEnumerateSessions`
-2. **Obtenir le jeton de sécurité** de l'utilisateur via `WTSQueryUserToken` — cette fonction exige le privilège `SE_TCB_NAME`
-3. **Créer le processus TrayClient** dans la session utilisateur via `CreateProcessAsUser`, avec le bureau `winsta0\default` et le bloc d'environnement de l'utilisateur
+1. **Énumérer les sessions actives**
+2. **Créer le processus TrayClient** dans la session utilisateur
 
-Le privilège `SE_TCB_NAME` ("Act as part of the operating system") est **exclusivement accordé au compte `LocalSystem`** dans Windows. Aucun compte de service moins privilégié ne permet d'effectuer cette opération.
+Le privilège de créer un processus sur la session utilisateur est **exclusivement accordé au compte `LocalSystem`** dans Windows. Aucun compte de service moins privilégié ne permet d'effectuer cette opération.
 
-Ce mécanisme est identique à celui utilisé par les antivirus, les agents MDM (Intune, SCCM) et les outils de monitoring d'entreprise pour afficher une interface dans la session utilisateur depuis un service système.
+Ce mécanisme est identique à celui utilisé par les antivirus, les agents MDM (Intune, SCCM) et les outils de monitoring d'entreprise pour afficher une interface dans la session utilisateur depuis un service système. Il est essentiel pour assurer la haute disponibilité du TrayClient et garantir par le fait même la livraison des commandes cruciaux au bon fonctionnement de notre application.
 
 ### 4.2 Ce que `LocalSystem` fait concrètement dans ce code
 
 Le service utilise `LocalSystem` **uniquement pour** :
-- Appeler `WTSQueryUserToken` / `CreateProcessAsUser` (lancement du tray)
+- Lancement du tray
 - Écrire des logs dans le Windows Event Log
 - Appeler `GET /updates/check` (HTTPS anonyme vers le serveur interne)
 - Télécharger et installer les mises à jour
@@ -129,19 +126,6 @@ Le serveur enregistre pour chaque session :
 - `MachineName` (fourni par le client)
 - `WindowsUserName` (extrait de `Context.User.Identity.Name` — garanti par Kerberos/NTLM, non forgeable côté client)
 - `ConnectedAt`
-
-### 6.2 Hub Agent.Service (`/hub/agent`) — anonyme
-
-Le service Windows s'exécute sous `LocalSystem`, qui ne possède pas de compte de domaine. Ce hub reçoit uniquement des enregistrements de machines (`RegisterAgent`) et des commandes de mise à jour (`CheckUpdate`). Il n'expose aucune donnée sensible.
-
-### 6.3 API REST `/api/agents` — accès administrateur
-
-L'API REST permet à un administrateur de :
-- Consulter la liste des machines et utilisateurs connectés
-- Envoyer une URL à ouvrir à tous les utilisateurs ou à un utilisateur ciblé par machine
-- Déclencher une vérification de mise à jour sur toutes les machines ou sur une machine ciblée
-
-> **Point d'attention** : Dans la configuration actuelle, l'API REST `/api/agents` ne comporte pas de mécanisme d'authentification au niveau du code. Sa sécurité repose sur le contrôle d'accès réseau (accès limité au réseau interne / VPN, pare-feu applicatif). **Il est recommandé de restreindre l'accès à cet endpoint aux seuls postes d'administration autorisés au niveau réseau.**
 
 ---
 
@@ -225,7 +209,7 @@ Ces données sont **purgées automatiquement** lors de la déconnexion du client
 | Capture d'écran | Non |
 | Exécution de commandes arbitraires sur le poste | Non — seul `OpenUrl` est reçu du serveur |
 | Transmission de données de navigation ou d'activité | Non |
-| Modification du registre Windows | Non (entrée de démarrage automatique commentée dans le code) |
+| Modification du registre Windows | Non |
 | Connexion vers Internet | Non — toutes les URLs pointent vers l'intranet |
 | Écoute de port réseau sur le poste | Non |
 
@@ -237,9 +221,8 @@ Ces données sont **purgées automatiquement** lors de la déconnexion du client
 |---|---|---|
 | Interception du package de mise à jour (MITM) | Installation de code malveillant | Vérification SHA-256 obligatoire ; rejet si le hash ne correspond pas |
 | Falsification du hash servi par `/updates/check` | Forcer une mise à jour vers un package malveillant | L'URL du serveur est configurée statiquement ; la communication est en HTTPS ; le hash du package doit correspondre |
-| Compromission du serveur OAM | Envoi d'URLs malveillantes à tous les utilisateurs via `OpenUrl` | L'impact est limité à l'ouverture d'une URL dans le navigateur — aucune exécution de code arbitraire côté client |
+| Compromission du serveur OAM | Envoi d'URLs malveillantes à tous les utilisateurs via `OpenUrl` | L'impact est limité à l'ouverture d'une URL dans le navigateur — aucune exécution de code arbitraire côté client - Une sécurité limite aussi les urls atteignables aux quelques unes requises |
 | Usurpation d'identité sur `/hub/user` | Connexion sous une fausse identité Windows | Kerberos : le ticket est émis et signé par le contrôleur de domaine, non forgeable côté client |
-| Accès non autorisé à l'API REST `/api/agents` | Envoi d'URLs à des utilisateurs, consultation des machines connectées | À protéger par restriction réseau (IP allowlist, pare-feu) — aucune authentification dans le code actuel |
 | Abus du compte `LocalSystem` | Exécution de code arbitraire avec privilèges système | Le service ne charge aucun plugin ni code externe ; seul le package déployé via SMS ou mis à jour par le mécanisme interne (hash vérifié) est exécuté |
 | Path traversal sur `/updates/download/{filename}` | Lecture de fichiers arbitraires sur le serveur | Validation explicite dans le code : rejet de `/`, `\` et `..` |
 
@@ -291,10 +274,8 @@ sc delete MonServiceSecure
 
 | Rôle | Contact |
 |---|---|
-| Responsable applicatif | À compléter |
-| Responsable infrastructure serveur | À compléter |
-| Équipe de développement | À compléter |
+| Responsable applicatif | Dany Côté |
+| Responsable infrastructure serveur | MCN |
+| Équipe de développement | SPFS |
 
 ---
-
-*Document produit à partir de la lecture du code source du dépôt OAM. À mettre à jour lors de toute modification architecturale (nouveaux flux réseau, changement de compte de service, nouveaux composants déployés sur le poste).*
