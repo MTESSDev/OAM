@@ -8,7 +8,7 @@
 
 ## 1. Description fonctionnelle
 
-OAM est un outil de gestion de postes de travail Windows destiné aux postes bureautique. Il se compose de deux parties distinctes : un **agent déployé sur chaque poste client** et un **serveur de gestion centralisé hébergé sur l'intranet**.
+OAM est un outil de gestion de postes de travail Windows destiné aux postes bureautique. Il est la pierre angulaire de la modernisation en cours de la plateforme central, une base mutualisable permettant de simplifier la navigation entre le central et les systèmes web du MESS. Il se compose de deux parties distinctes : un **agent déployé sur chaque poste client** et un **serveur de gestion centralisé hébergé sur l'intranet**.
 
 L'agent permet au serveur de :
 - Connaître en temps réel quelles machines et quels utilisateurs sont connectés
