@@ -243,36 +243,39 @@ function Invoke-MakeUpdate {
     dotnet publish $UpdaterProjectPath --configuration Release --output $UpdatePackageDir --self-contained false
     if ($LASTEXITCODE -ne 0) { Write-ERR "Publication echouee."; exit 1 }
 
-    # 2. Lire la version dans le binaire publie
-    $serviceExe = Join-Path $UpdatePackageDir "Agent.Service.exe"
-    $newVersion  = (Get-Item $serviceExe).VersionInfo.ProductVersion
-    if ([string]::IsNullOrWhiteSpace($newVersion)) { $newVersion = "1.0.0" }
-    Write-INF "Version du package : $newVersion"
-
-    # 3. Creer le ZIP
-    $zipName = "agent-$newVersion.zip"
+    # 2. Creer le ZIP
+    $zipName = "agent.zip"
     $zipPath = Join-Path $PSScriptRoot ".publish\$zipName"
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
     Compress-Archive -Path "$UpdatePackageDir\*" -DestinationPath $zipPath
     Write-OK "ZIP cree : $zipPath"
 
-    # 4. Calculer le SHA-256
+    # 3. Calculer le SHA-256
     $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
     Write-OK "SHA-256  : $hash"
 
-    # 5. Copier le ZIP dans le dossier updates\ du serveur publie
+    # 4. Copier le ZIP dans le dossier updates\ du serveur publie
     $serverUpdateDir = Join-Path $PSScriptRoot ".publish\Agent.Server\updates"
     if (-not (Test-Path $serverUpdateDir)) { New-Item -ItemType Directory -Path $serverUpdateDir | Out-Null }
     Copy-Item $zipPath $serverUpdateDir -Force
     Write-OK "ZIP copie dans : $serverUpdateDir"
 
-    # 6. Afficher ce qu'il faut mettre dans appsettings.json du serveur
+    # 5. Mettre a jour automatiquement appsettings.json du serveur publie
+    $serverAppSettings = Join-Path $PSScriptRoot ".publish\Agent.Server\appsettings.json"
+    if (Test-Path $serverAppSettings) {
+        $json = Get-Content $serverAppSettings -Raw | ConvertFrom-Json
+        $json.Update.Hash        = $hash
+        $json.Update.DownloadUrl = "https://localhost:5001/updates/download/$zipName"
+        $json | ConvertTo-Json -Depth 10 | Set-Content $serverAppSettings -Encoding UTF8
+        Write-OK "appsettings.json du serveur mis a jour automatiquement."
+    }
+
+    # 6. Afficher ce qu'il faut mettre dans appsettings.json du serveur (source)
     Write-Host ""
     Write-Host "---------------------------------------------------" -ForegroundColor Green
-    Write-Host " Mets a jour appsettings.json du serveur :" -ForegroundColor Green
+    Write-Host " Mets a jour appsettings.json du serveur (source) :" -ForegroundColor Green
     Write-Host "---------------------------------------------------" -ForegroundColor Green
     Write-Host "  `"Update`": {" -ForegroundColor White
-    Write-Host "    `"LatestVersion`": `"$newVersion`"," -ForegroundColor Yellow
     Write-Host "    `"DownloadUrl`": `"https://localhost:5001/updates/download/$zipName`"," -ForegroundColor Yellow
     Write-Host "    `"Hash`": `"$hash`"" -ForegroundColor Yellow
     Write-Host "  }" -ForegroundColor White

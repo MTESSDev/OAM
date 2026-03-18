@@ -1,5 +1,4 @@
 // Controllers/UpdateController.cs
-using Agent.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using System;
@@ -20,34 +19,27 @@ public class UpdateController : ControllerBase
     }
 
     /// <summary>
-    /// L'agent appelle cet endpoint en passant sa version courante.
-    /// Retourne hasUpdate=false si déjà à jour, ou les infos du package sinon.
-    /// GET /updates/check?version=1.0.0
+    /// Retourne le hash SHA-256 du package courant et son URL de téléchargement.
+    /// Le client compare ce hash avec son dernier hash appliqué — si différent, il met à jour.
+    /// GET /updates/check
     /// </summary>
     [HttpGet("check")]
-    public IActionResult Check([FromQuery] string version)
+    public IActionResult Check()
     {
-        if (string.IsNullOrWhiteSpace(version))
-            return BadRequest(new { error = "Paramètre 'version' requis." });
-
-        if (version == _manifest.LatestVersion)
-            return Ok(new { hasUpdate = false });
-
         return Ok(new
         {
-            hasUpdate = true,
-            update    = new UpdateInfo(_manifest.LatestVersion, _manifest.DownloadUrl, _manifest.Hash)
+            hash        = _manifest.Hash,
+            downloadUrl = _manifest.DownloadUrl
         });
     }
 
     /// <summary>
     /// Sert le fichier ZIP de mise à jour depuis le dossier local "updates/".
-    /// GET /updates/download/agent-1.0.1.zip
+    /// GET /updates/download/agent.zip
     /// </summary>
     [HttpGet("download/{filename}")]
     public IActionResult Download(string filename)
     {
-        // Sécurité : rejeter tout chemin qui sort du dossier updates/
         if (filename.Contains('/') || filename.Contains('\\') || filename.Contains(".."))
             return BadRequest(new { error = "Nom de fichier invalide." });
 
@@ -61,10 +53,8 @@ public class UpdateController : ControllerBase
     }
 }
 
-/// <summary>Modèle de configuration lu depuis appsettings.json → "Update".</summary>
 public sealed class UpdateManifestConfig
 {
-    public string LatestVersion { get; init; } = "1.0.0";
-    public string DownloadUrl   { get; init; } = string.Empty;
-    public string Hash          { get; init; } = string.Empty;
+    public string Hash        { get; init; } = string.Empty;
+    public string DownloadUrl { get; init; } = string.Empty;
 }

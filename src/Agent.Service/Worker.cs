@@ -9,7 +9,6 @@ using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Net.Http.Json;
-using System.Reflection;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Threading;
@@ -23,6 +22,7 @@ public class MainWorker : BackgroundService
     private readonly ILogger<MainWorker> _logger;
     private readonly string _updateUrl;
     private readonly string _trayExePath;
+    private readonly string _hashFilePath;
     private readonly HttpClient _http = new();
 
     public MainWorker(ILogger<MainWorker> logger, IConfiguration configuration)
@@ -34,6 +34,7 @@ public class MainWorker : BackgroundService
         _trayExePath = string.IsNullOrWhiteSpace(configuredPath)
             ? Path.Combine(AppContext.BaseDirectory, "tray", "Agent.TrayClient.exe")
             : configuredPath;
+        _hashFilePath = Path.Combine(AppContext.BaseDirectory, "last-update.sha256");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -53,58 +54,65 @@ public class MainWorker : BackgroundService
 
     // ── Mise à jour ──────────────────────────────────────────────────────────
 
+    private string ReadStoredHash()
+    {
+        if (!File.Exists(_hashFilePath)) return string.Empty;
+        return File.ReadAllText(_hashFilePath).Trim().ToLowerInvariant();
+    }
+
     private async Task CheckAndRunUpdate(CancellationToken token)
     {
-        string currentVersion = Assembly.GetExecutingAssembly()
-            .GetName().Version?.ToString(3) ?? "1.0.0";
-
         try
         {
-            // 1. Interroger le serveur
-            _logger.LogInformation("Vérification des mises à jour (version courante : {Version})...", currentVersion);
+            // 1. Lire le hash local (celui du package actuellement installé)
+            string storedHash = ReadStoredHash();
+            _logger.LogInformation("Vérification des mises à jour (hash local : {Hash})...",
+                string.IsNullOrEmpty(storedHash) ? "(aucun)" : storedHash);
 
-            var response = await _http.GetFromJsonAsync<UpdateCheckResponse>(
-                $"{_updateUrl}?version={currentVersion}", token);
+            // 2. Interroger le serveur
+            var response = await _http.GetFromJsonAsync<UpdateCheckResponse>(_updateUrl, token);
 
-            if (response?.HasUpdate != true || response.Update is null)
+            if (response is null || string.IsNullOrWhiteSpace(response.Hash))
             {
-                _logger.LogInformation("Aucune mise à jour disponible.");
+                _logger.LogWarning("Réponse invalide du serveur de mise à jour.");
                 return;
             }
 
-            _logger.LogInformation("Mise à jour disponible : {Old} → {New}.",
-                currentVersion, response.Update.Version);
+            string serverHash = response.Hash.Trim().ToLowerInvariant();
 
-            // 2. Télécharger le ZIP
-            string tempZip = Path.Combine(
-                Path.GetTempPath(), $"OAM-update-{response.Update.Version}.zip");
+            if (string.Equals(storedHash, serverHash, StringComparison.Ordinal))
+            {
+                _logger.LogInformation("Aucune mise à jour disponible (hash identique).");
+                return;
+            }
 
-            _logger.LogInformation("Téléchargement depuis {Url}...", response.Update.Url);
-            byte[] zipBytes = await _http.GetByteArrayAsync(response.Update.Url, token);
+            _logger.LogInformation("Mise à jour détectée. Hash serveur : {Hash}", serverHash);
+
+            // 3. Télécharger le ZIP
+            string tempZip = Path.Combine(Path.GetTempPath(), "OAM-update.zip");
+            _logger.LogInformation("Téléchargement depuis {Url}...", response.DownloadUrl);
+            byte[] zipBytes = await _http.GetByteArrayAsync(response.DownloadUrl, token);
             await File.WriteAllBytesAsync(tempZip, zipBytes, token);
 
-            // 3. Vérifier le hash SHA-256
+            // 4. Vérifier le hash SHA-256 du fichier téléchargé
             string actualHash = Convert.ToHexString(SHA256.HashData(zipBytes)).ToLowerInvariant();
-            if (!string.Equals(actualHash, response.Update.Hash, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(actualHash, serverHash, StringComparison.Ordinal))
             {
                 _logger.LogError(
-                    "Hash SHA-256 invalide pour la mise à jour {Version} " +
-                    "(attendu : {Expected}, reçu : {Actual}). Abandon.",
-                    response.Update.Version, response.Update.Hash, actualHash);
+                    "Hash SHA-256 invalide (attendu : {Expected}, reçu : {Actual}). Abandon.",
+                    serverHash, actualHash);
                 File.Delete(tempZip);
                 return;
             }
 
-            // 4. Extraire le ZIP dans un dossier temp
-            string extractDir = Path.Combine(
-                Path.GetTempPath(), $"OAM-update-{response.Update.Version}");
-
+            // 5. Extraire le ZIP dans un dossier temp
+            string extractDir = Path.Combine(Path.GetTempPath(), "OAM-update");
             if (Directory.Exists(extractDir)) Directory.Delete(extractDir, true);
             ZipFile.ExtractToDirectory(tempZip, extractDir);
             File.Delete(tempZip);
             _logger.LogInformation("ZIP extrait dans {Dir}.", extractDir);
 
-            // 5. Lancer Agent.Updater (arrête le service, remplace les fichiers, redémarre)
+            // 6. Lancer Agent.Updater (arrête le service, remplace les fichiers, redémarre)
             string updaterPath = Path.Combine(AppContext.BaseDirectory, "Agent.Updater.exe");
             if (!File.Exists(updaterPath))
             {
@@ -112,21 +120,19 @@ public class MainWorker : BackgroundService
                 return;
             }
 
-            string backupDir = Path.Combine(
-                Path.GetTempPath(), $"OAM-backup-{currentVersion}");
+            string backupDir  = Path.Combine(Path.GetTempPath(), "OAM-backup");
             string installDir = AppContext.BaseDirectory.TrimEnd('\\', '/');
 
+            // Passer le nouveau hash en dernier argument : l'Updater l'écrit dans last-update.sha256
             Process.Start(new ProcessStartInfo
             {
-                FileName         = updaterPath,
-                Arguments        = $"\"{AppConstants.ServiceName}\" \"{extractDir}\" \"{installDir}\" \"{backupDir}\"",
-                UseShellExecute  = false,
-                CreateNoWindow   = true
+                FileName        = updaterPath,
+                Arguments       = $"\"{AppConstants.ServiceName}\" \"{extractDir}\" \"{installDir}\" \"{backupDir}\" \"{serverHash}\"",
+                UseShellExecute = false,
+                CreateNoWindow  = true
             });
 
-            _logger.LogInformation(
-                "Agent.Updater lancé pour {Version}. Le service va s'arrêter et redémarrer.",
-                response.Update.Version);
+            _logger.LogInformation("Agent.Updater lancé. Le service va s'arrêter et redémarrer.");
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -143,4 +149,4 @@ public class MainWorker : BackgroundService
 }
 
 // Réponse de GET /updates/check
-file record UpdateCheckResponse(bool HasUpdate, UpdateInfo? Update);
+file record UpdateCheckResponse(string Hash, string DownloadUrl);
