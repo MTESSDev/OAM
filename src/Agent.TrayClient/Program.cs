@@ -32,6 +32,8 @@ public class MyTrayContext : ApplicationContext
     // dans un tray app sans fenêtre principale (Current peut être null avant Application.Run)
     private readonly Control _uiInvoker = new();
     private System.Drawing.Icon? _currentIcon;
+    // Annulé à chaque changement réseau pour déclencher une reconnexion immédiate
+    private CancellationTokenSource _networkChangeCts = new();
 
     public MyTrayContext()
     {
@@ -72,6 +74,9 @@ public class MyTrayContext : ApplicationContext
                 return Task.CompletedTask;
             };
 
+            // Reconnexion immédiate dès que le réseau change (VPN up, wifi, etc.)
+            System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += OnNetworkChanged;
+
             Task.Run(() => ConnectSignalRAsync(_cts.Token));
         }
 
@@ -80,8 +85,27 @@ public class MyTrayContext : ApplicationContext
 
     // ── Connexion SignalR ────────────────────────────────────────────────────
 
+    private void OnNetworkChanged(object? sender, EventArgs e)
+    {
+        // VPN up, changement wifi, etc. — annule l'attente en cours pour retry immédiat
+        var old = Interlocked.Exchange(ref _networkChangeCts, new CancellationTokenSource());
+        try { old.Cancel(); } finally { old.Dispose(); }
+    }
+
+    private static readonly TimeSpan[] RetryDelays =
+    [
+        TimeSpan.FromSeconds(5),
+        TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(30),
+        TimeSpan.FromMinutes(1),
+        TimeSpan.FromMinutes(2),
+        TimeSpan.FromMinutes(5),   // plafond — retry toutes les 5 min indéfiniment
+    ];
+
     private async Task ConnectSignalRAsync(CancellationToken token)
     {
+        int attempt = 0;
+
         while (!token.IsCancellationRequested)
         {
             try
@@ -91,6 +115,7 @@ public class MyTrayContext : ApplicationContext
                     await _hubConnection.StartAsync(token);
                     await _hubConnection.InvokeAsync("RegisterUser", Environment.MachineName, token);
                     SetIconAsync(ConnectionStatus.Connected);
+                    attempt = 0; // réinitialise le backoff après une connexion réussie
                 }
 
                 await Task.Delay(5_000, token);
@@ -98,10 +123,24 @@ public class MyTrayContext : ApplicationContext
             catch (OperationCanceledException) { break; }
             catch
             {
-                await _hubConnection!.StopAsync(token);
+                await _hubConnection!.StopAsync(CancellationToken.None);
                 SetIconAsync(ConnectionStatus.Disconnected);
-                try { await Task.Delay(10_000, token); }
-                catch (OperationCanceledException) { break; }
+
+                // Backoff exponentiel plafonné — interruptible par un changement réseau
+                var delay = RetryDelays[Math.Min(attempt, RetryDelays.Length - 1)];
+                attempt++;
+
+                using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    token, _networkChangeCts.Token);
+                try
+                {
+                    await Task.Delay(delay, delayCts.Token);
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                {
+                    // Changement réseau détecté — on retente immédiatement
+                    attempt = 0;
+                }
             }
         }
     }
