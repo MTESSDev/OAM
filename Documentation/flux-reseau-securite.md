@@ -1,82 +1,88 @@
-# Flux réseau — Agent.Service
+# Flux réseau - Génération de correspondance OAM
 
-## Diagramme de séquence (flux principal)
+## Diagramme de séquence
 
 ```mermaid
 sequenceDiagram
-    actor TC as Transaction Centrale<br/>(Ordinateur central)
-    participant GCO as Serveur GCO<br/>(Gestion des correspondances)
-    participant SRV as Agent.Server<br/>(ASP.NET Core)<br/>:5000 HTTP / :5001 HTTPS
-    participant SVC as Agent.Service<br/>(Windows Service SYSTEM)<br/>Poste de travail
-    participant TRAY as Agent.TrayClient<br/>(WinForms / Barre système)<br/>Session utilisateur
+    autonumber
 
-    Note over TC,TRAY: ── Flux principal : ouverture d'URL sur un poste ──
+    box Zone IBM Central
+        actor Utilisateur
+        participant IBM as Système IBM
+    end
 
-    TC->>GCO: Demande métier<br/>(protocole interne GCO)
-    GCO->>SRV: POST /api/agents/{machineName}/openurl<br/>{ "url": "https://..." }<br/>HTTPS (port 5001)
-    SRV-->>GCO: 200 OK { sent: true, target: machineName }
+    box Zone GCO (Intranet mes.reseau.intra<br>/ Serveur applicatif)
+        participant GCO as Serveur GCO<br/>Service Web
+    end
 
-    Note over SRV,SVC: Connexion persistante SignalR (WebSocket)<br/>maintenue par Agent.Service
+    box Zone OAM (Intranet mes.reseau.intra<br> / Serveur applicatif)
+        participant OAM as Serveur OAM<br/>Agent.Server
+    end
 
-    SRV--)SVC: SendAsync("OpenUrl", url)<br/>SignalR push sur connexion WebSocket existante
+    box Zone Agents (Postes clients)
+        participant Agent as Poste Agent<br/>(navigateur / client)
+    end
 
-    Note over SVC,TRAY: IPC local (Named Pipe — même machine)
+    Note over Agent,OAM: Connexion SignalR persistante établie au démarrage
 
-    SVC->>TRAY: CommandOpenUrl + url<br/>Named Pipe (\\.\pipe\AgentPipe)<br/>ACL : BUILTIN\Users
+    Agent->>OAM: HTTPS :443 — WebSocket / SignalR (connexion persistante)
 
-    TRAY->>TRAY: Process.Start(url)<br/>Ouvre le navigateur par défaut
+    Note over Utilisateur,GCO: Déclenchement de la génération de correspondance
+
+    Utilisateur->>IBM: Déclenche la commande
+    IBM->>GCO: HTTPS :443 — Appel service web<br/>(génération de correspondance)
+    GCO->>OAM: HTTPS :443 — Appel API OAM<br/>(notifier l'agent cible)
+    OAM-->>Agent: SignalR (push temps réel)<br/>Alerte le bon poste agent connecté
 ```
 
 ---
 
-## Diagramme d'architecture réseau
+## Diagramme de flux (zones et sens)
 
 ```mermaid
-flowchart TD
-    subgraph RESEAU_CENTRAL["Zone réseau centrale"]
-        TC["Transaction Centrale\n(ordinateur central)"]
-        GCO["Serveur GCO\n(Gestion des correspondances)"]
+flowchart LR
+    subgraph ZONE_IBM ["Zone IBM Central"]
+        U([Utilisateur])
+        IBM[Système IBM]
     end
 
-    subgraph RESEAU_SERVEUR["Zone DMZ / Serveur applicatif"]
-        SRV["Agent.Server\nASP.NET Core 10\nREST API  ->  /api/agents\nSignalR Hub  ->  /hub\nHTTP :5000 / HTTPS :5001"]
+    subgraph ZONE_GCO ["Zone GCO"]
+        GCO["Serveur GCO\nService Web"]
     end
 
-    subgraph POSTE["Poste de travail (Session Windows)"]
-        subgraph SESSION0["Session 0 — SYSTEM"]
-            SVC["Agent.Service\nWindows Service\n(BackgroundService)"]
-        end
-        subgraph SESSION_USER["Session utilisateur active"]
-            TRAY["Agent.TrayClient\nWinForms — Barre système"]
-            BROWSER["Navigateur par défaut"]
-        end
+    subgraph ZONE_OAM ["Zone OAM"]
+        OAM["Serveur OAM\nAgent.Server"]
     end
 
-    TC -->|"Protocole métier GCO"| GCO
-    GCO -->|"REST HTTPS\nPOST /api/agents/{machine}/openurl\nPort 5001"| SRV
+    subgraph ZONE_AGENTS ["Zone Agents (postes clients)"]
+        A1["Poste Agent 1"]
+        A2["Poste Agent 2"]
+        AN["Poste Agent N"]
+    end
 
-    SVC -->|"WebSocket TLS\nSignalR — /hub\nPort 5001\n(connexion sortante persistante)"| SRV
-    SRV -.->|"SignalR Push\nSendAsync('OpenUrl')"| SVC
+    U -->|"déclenche"| IBM
+    IBM -->|"HTTPS :443\nAppel service web"| GCO
+    GCO -->|"HTTPS :443\nAppel API"| OAM
+    OAM -.->|"SignalR push\n(WebSocket HTTPS :443)"| A1
+    OAM -.->|"SignalR push\n(WebSocket HTTPS :443)"| A2
+    OAM -.->|"SignalR push\n(WebSocket HTTPS :443)"| AN
 
-    SVC -->|"Named Pipe local\n\\\\.\\pipe\\AgentPipe\nACL: BUILTIN\\Users"| TRAY
-    SVC -->|"CreateProcessAsUser\nWTSQueryUserToken\n(lancement dans session user)"| TRAY
-    TRAY -->|"Process.Start\n(ShellExecute)"| BROWSER
-
-    style RESEAU_CENTRAL fill:#dbeafe,stroke:#2563eb
-    style RESEAU_SERVEUR fill:#dcfce7,stroke:#16a34a
-    style POSTE fill:#fef9c3,stroke:#ca8a04
-    style SESSION0 fill:#fee2e2,stroke:#dc2626
-    style SESSION_USER fill:#f3e8ff,stroke:#9333ea
+    style ZONE_IBM fill:#dbeafe,stroke:#3b82f6
+    style ZONE_GCO fill:#fef9c3,stroke:#ca8a04
+    style ZONE_OAM fill:#dcfce7,stroke:#16a34a
+    style ZONE_AGENTS fill:#fce7f3,stroke:#db2777
 ```
 
 ---
 
-## Points d'attention sécurité
+## Description des flux
 
-| # | Élément | Observation | Risque |
-|---|---------|-------------|--------|
-| 1 | **REST API sans authentification** | `AgentsController` n'a aucun `[Authorize]` | Tout appelant réseau peut déclencher un `OpenUrl` sur n'importe quel poste |
-| 2 | **HTTP exposé** | Port `5000` non chiffré déclaré dans `appsettings.json` | Interception possible si pas de firewall |
-| 3 | **URL non validée** | Le champ `url` reçu en JSON est transmis directement à `Process.Start(ShellExecute)` | SSRF / exécution de protocoles arbitraires (ex. `file://`, `ms-excel://`) |
-| 4 | **Named Pipe ACL** | Accessible à `BUILTIN\Users` (tout utilisateur local) | Un autre processus utilisateur peut injecter des commandes dans le pipe |
-| 5 | **AllowedHosts: `*`** | Pas de restriction d'hôte sur le serveur | Facilite les attaques de type host-header injection |
+| # | Source | Destination | Protocole | Port | Description |
+|---|--------|-------------|-----------|------|-------------|
+| 1 | Poste Agent | Serveur OAM | HTTPS / WebSocket | 443 | Connexion SignalR persistante (établie au démarrage de l'agent) |
+| 2 | Système IBM | Serveur GCO | HTTPS | 443 | Déclenchement de la génération de correspondance |
+| 3 | Serveur GCO | Serveur OAM | HTTPS | 443 | Appel API vers Agent.Server pour notifier l'agent cible |
+| 4 | Serveur OAM | Poste Agent | SignalR (WebSocket) | 443 | Push temps réel vers le bon poste agent connecté |
+
+> Tous les échanges en production transitent sur **HTTPS port 443**.
+> Le flux SignalR (flèche pointillée) est un **push serveur vers client** sur la connexion WebSocket préalablement établie.
