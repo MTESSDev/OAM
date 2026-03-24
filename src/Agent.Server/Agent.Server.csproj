@@ -3,6 +3,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <PropertyGroup>
+    <AspNetCoreHostingModel>InProcess</AspNetCoreHostingModel>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Agent.Shared\Agent.Shared.csproj" />
   </ItemGroup>
