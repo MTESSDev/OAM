@@ -16,7 +16,7 @@ $ErrorActionPreference = "Stop"
 # ── Configuration ──────────────────────────────────────────────────────────
 $ServiceName          = "AgentOAM"
 $ServiceDisplayName   = "Agent OAM"
-$ServiceDesc          = "Outil d'aide à la mission"
+$ServiceDesc          = "Outil d'aide $([char]0x00E0) la mission"
 $ServiceProjectPath   = Join-Path $PSScriptRoot "src\Agent.Service"
 $TrayProjectPath      = Join-Path $PSScriptRoot "src\Agent.TrayClient"
 $UpdaterProjectPath   = Join-Path $PSScriptRoot "src\Agent.Updater"
