@@ -188,7 +188,7 @@ public class MyTrayContext : ApplicationContext
     private static void EnsureStartup()
     {
         const string registryKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        const string appName     = "MonServiceSecureTray";
+        const string appName     = "AgentOAMTray";
         string exePath = Assembly.GetExecutingAssembly().Location
             .Replace(".dll", ".exe", StringComparison.OrdinalIgnoreCase);
 

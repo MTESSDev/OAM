@@ -1,5 +1,4 @@
 // Worker.cs
-using Agent.Shared;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -46,10 +45,16 @@ public class MainWorker : BackgroundService
         // 2. Vérification de mise à jour immédiate au démarrage
         await CheckAndRunUpdate(stoppingToken);
 
-        // 3. Vérification périodique toutes les heures
-        using var timer = new PeriodicTimer(TimeSpan.FromHours(1));
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        // 3. Vérification quotidienne dans la fenêtre de nuit (1h00–6h00)
+        // Délai aléatoire dans la fenêtre pour étaler la charge sur le serveur
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var delay = DelayUntilNextNightWindow();
+            _logger.LogInformation("Prochaine vérification de mise à jour dans {h}h{m:D2}.",
+                (int)delay.TotalHours, delay.Minutes);
+            await Task.Delay(delay, stoppingToken);
             await CheckAndRunUpdate(stoppingToken);
+        }
     }
 
     // ── Mise à jour ──────────────────────────────────────────────────────────
@@ -70,7 +75,17 @@ public class MainWorker : BackgroundService
                 string.IsNullOrEmpty(storedHash) ? "(aucun)" : storedHash);
 
             // 2. Interroger le serveur
-            var response = await _http.GetFromJsonAsync<UpdateCheckResponse>(_updateUrl, token);
+            var httpResponse = await _http.GetAsync(_updateUrl, token);
+
+            if (httpResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogInformation("Aucun package de mise à jour disponible sur le serveur.");
+                return;
+            }
+
+            httpResponse.EnsureSuccessStatusCode();
+
+            var response = await httpResponse.Content.ReadFromJsonAsync<UpdateCheckResponse>(cancellationToken: token);
 
             if (response is null || string.IsNullOrWhiteSpace(response.Hash))
             {
@@ -112,33 +127,62 @@ public class MainWorker : BackgroundService
             File.Delete(tempZip);
             _logger.LogInformation("ZIP extrait dans {Dir}.", extractDir);
 
-            // 6. Lancer Agent.Updater (arrête le service, remplace les fichiers, redémarre)
-            string updaterPath = Path.Combine(AppContext.BaseDirectory, "Agent.Updater.exe");
-            if (!File.Exists(updaterPath))
+            // 6. Lancer Agent.Updater depuis un dossier temp pour éviter qu'il s'écrase lui-même
+            string updaterSource = Path.Combine(AppContext.BaseDirectory, "Agent.Updater.exe");
+            if (!File.Exists(updaterSource))
             {
-                _logger.LogError("Agent.Updater.exe introuvable : {Path}. Mise à jour annulée.", updaterPath);
+                _logger.LogError("Agent.Updater.exe introuvable : {Path}. Mise à jour annulée.", updaterSource);
                 return;
             }
 
             string backupDir  = Path.Combine(Path.GetTempPath(), "OAM-backup");
             string installDir = AppContext.BaseDirectory.TrimEnd('\\', '/');
 
-            // Passer le nouveau hash en dernier argument : l'Updater l'écrit dans last-update.sha256
+            // Copie de l'updater en temp : il tourne hors de installDir et peut donc écraser sa propre source
+            // Agent.Updater est publié en single-file self-contained : un seul .exe suffit
+            string updaterTempDir = Path.Combine(Path.GetTempPath(), "OAM-updater");
+            Directory.CreateDirectory(updaterTempDir);
+            File.Copy(updaterSource, Path.Combine(updaterTempDir, "Agent.Updater.exe"), overwrite: true);
+
+            // cmd /c start lance le processus de façon détachée — il survit à l'arrêt du service parent
+            string updaterExe = Path.Combine(updaterTempDir, "Agent.Updater.exe");
+            string arguments  = $"\"AgentOAM\" \"{extractDir}\" \"{installDir}\" \"{backupDir}\" \"{serverHash}\"";
+
             Process.Start(new ProcessStartInfo
             {
-                FileName        = updaterPath,
-                Arguments       = $"\"{AppConstants.ServiceName}\" \"{extractDir}\" \"{installDir}\" \"{backupDir}\" \"{serverHash}\"",
+                FileName        = "cmd.exe",
+                Arguments       = $"/c start \"\" \"{updaterExe}\" {arguments}",
                 UseShellExecute = false,
-                CreateNoWindow  = true
+                CreateNoWindow  = true, 
             });
 
-            _logger.LogInformation("Agent.Updater lancé. Le service va s'arrêter et redémarrer.");
+            _logger.LogInformation("Agent.Updater lancé (détaché). Le service va s'arrêter et redémarrer.");
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erreur lors de la vérification/application de la mise à jour.");
         }
+    }
+
+    /// <summary>
+    /// Calcule le délai jusqu'à un moment aléatoire dans la prochaine fenêtre de nuit (1h00–6h00).
+    /// Le délai aléatoire étale la charge sur le serveur quand plusieurs postes vérifient en même temps.
+    /// </summary>
+    private static TimeSpan DelayUntilNextNightWindow()
+    {
+        const int windowStartHour = 1;
+        const int windowEndHour   = 6;
+
+        var now        = DateTime.Now;
+        var windowMins = (windowEndHour - windowStartHour) * 60;
+        var offset     = TimeSpan.FromMinutes(Random.Shared.Next(0, windowMins));
+        var target     = now.Date.AddHours(windowStartHour).Add(offset);
+
+        if (target <= now)
+            target = target.AddDays(1);
+
+        return target - now;
     }
 
     public override void Dispose()

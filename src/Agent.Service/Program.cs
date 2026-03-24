@@ -9,27 +9,27 @@ using Microsoft.Extensions.Logging.EventLog;
 var builder = Host.CreateApplicationBuilder(args);
 
 // 1. CRITIQUE : Configurer l'application pour tourner comme un Service Windows
-// (Nécessite le package NuGet Microsoft.Extensions.Hosting.WindowsServices)
+// (Nï¿½cessite le package NuGet Microsoft.Extensions.Hosting.WindowsServices)
 builder.Services.AddWindowsService(options =>
 {
-    // C'est le nom officiel sous lequel le service sera enregistré dans services.msc
-    options.ServiceName = "MonServiceSecure";
+    // C'est le nom officiel sous lequel le service sera enregistrï¿½ dans services.msc
+    options.ServiceName = "AgentOAM";
 });
 
 // 2. Configuration des logs
 // Comme un service tourne en "Session 0" (sans interface), les Console.WriteLine sont invisibles.
-// On redirige les logs vers l'Observateur d'événements Windows (Event Viewer).
+// On redirige les logs vers l'Observateur d'ï¿½vï¿½nements Windows (Event Viewer).
 builder.Services.AddLogging(loggingBuilder =>
 {
     loggingBuilder.AddEventLog(new EventLogSettings
     {
-        SourceName = "MonServiceSecure" // Nom de la source dans l'Event Viewer
+        SourceName = "AgentOAM" // Nom de la source dans l'Event Viewer
     });
 });
 
 // 3. Enregistrement de notre boucle principale (Le cerveau IPC + SignalR)
 builder.Services.AddHostedService<MainWorker>();
 
-// 4. Construction et exécution bloquante
+// 4. Construction et exï¿½cution bloquante
 var host = builder.Build();
 host.Run();

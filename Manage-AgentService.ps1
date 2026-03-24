@@ -14,8 +14,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ── Configuration ──────────────────────────────────────────────────────────
-$ServiceName          = "MonServiceSecure"
-$ServiceDesc          = "Agent OAM - Surveillance et mise a jour"
+$ServiceName          = "AgentOAM"
+$ServiceDisplayName   = "Agent OAM"
+$ServiceDesc          = "Outil d'aide à la mission"
 $ServiceProjectPath   = Join-Path $PSScriptRoot "src\Agent.Service"
 $TrayProjectPath      = Join-Path $PSScriptRoot "src\Agent.TrayClient"
 $UpdaterProjectPath   = Join-Path $PSScriptRoot "src\Agent.Updater"
@@ -54,8 +55,9 @@ function Invoke-Build {
     Write-INF "Publication Agent.Service..."
     dotnet publish $ServiceProjectPath `
         --configuration Release `
-        --output $PublishDir `
-        --self-contained false
+        --runtime win-x64 `
+        --self-contained `
+        --output $PublishDir
 
     if ($LASTEXITCODE -ne 0) {
         Write-ERR "Publication Agent.Service echouee (code $LASTEXITCODE)."
@@ -67,8 +69,9 @@ function Invoke-Build {
     Write-INF "Publication Agent.TrayClient..."
     dotnet publish $TrayProjectPath `
         --configuration Release `
-        --output $TrayPublishDir `
-        --self-contained false
+        --runtime win-x64 `
+        --self-contained `
+        --output $TrayPublishDir
 
     if ($LASTEXITCODE -ne 0) {
         Write-ERR "Publication Agent.TrayClient echouee (code $LASTEXITCODE)."
@@ -76,11 +79,10 @@ function Invoke-Build {
     }
 
     # 3. Publier Agent.Updater dans le meme dossier que le Service
-    Write-INF "Publication Agent.Updater..."
+    Write-INF "Publication Agent.Updater (single-file self-contained)..."
     dotnet publish $UpdaterProjectPath `
         --configuration Release `
-        --output $PublishDir `
-        --self-contained false
+        --output $PublishDir
 
     if ($LASTEXITCODE -ne 0) {
         Write-ERR "Publication Agent.Updater echouee (code $LASTEXITCODE)."
@@ -119,7 +121,7 @@ function Invoke-Install {
     New-Service `
         -Name           $ServiceName `
         -BinaryPathName $ExePath `
-        -DisplayName    $ServiceName `
+        -DisplayName    $ServiceDisplayName `
         -Description    $ServiceDesc `
         -StartupType    Automatic
 
@@ -225,22 +227,22 @@ function Invoke-Logs {
 }
 
 function Invoke-MakeUpdate {
-    Write-Header "Creation du package de mise a jour"
+    Write-Header "Creation du package de mise a jour (self-contained win-x64)"
 
     # 1. Publier tous les composants dans un dossier temporaire
     if (Test-Path $UpdatePackageDir) { Remove-Item $UpdatePackageDir -Recurse -Force }
 
     Write-INF "Publication Agent.Service..."
-    dotnet publish $ServiceProjectPath --configuration Release --output $UpdatePackageDir --self-contained false
+    dotnet publish $ServiceProjectPath --configuration Release --runtime win-x64 --self-contained --output $UpdatePackageDir
     if ($LASTEXITCODE -ne 0) { Write-ERR "Publication echouee."; exit 1 }
 
     Write-INF "Publication Agent.TrayClient..."
     $updateTrayDir = Join-Path $UpdatePackageDir "tray"
-    dotnet publish $TrayProjectPath --configuration Release --output $updateTrayDir --self-contained false
+    dotnet publish $TrayProjectPath --configuration Release --runtime win-x64 --self-contained --output $updateTrayDir
     if ($LASTEXITCODE -ne 0) { Write-ERR "Publication echouee."; exit 1 }
 
-    Write-INF "Publication Agent.Updater..."
-    dotnet publish $UpdaterProjectPath --configuration Release --output $UpdatePackageDir --self-contained false
+    Write-INF "Publication Agent.Updater (single-file self-contained)..."
+    dotnet publish $UpdaterProjectPath --configuration Release --output $UpdatePackageDir
     if ($LASTEXITCODE -ne 0) { Write-ERR "Publication echouee."; exit 1 }
 
     # 2. Creer le ZIP
@@ -250,36 +252,13 @@ function Invoke-MakeUpdate {
     Compress-Archive -Path "$UpdatePackageDir\*" -DestinationPath $zipPath
     Write-OK "ZIP cree : $zipPath"
 
-    # 3. Calculer le SHA-256
-    $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
-    Write-OK "SHA-256  : $hash"
-
-    # 4. Copier le ZIP dans le dossier updates\ du serveur publie
+    # 3. Copier le ZIP dans le dossier updates\ du serveur publie
+    # Le hash est calcule dynamiquement par le serveur au moment de /updates/check
     $serverUpdateDir = Join-Path $PSScriptRoot ".publish\Agent.Server\updates"
     if (-not (Test-Path $serverUpdateDir)) { New-Item -ItemType Directory -Path $serverUpdateDir | Out-Null }
     Copy-Item $zipPath $serverUpdateDir -Force
     Write-OK "ZIP copie dans : $serverUpdateDir"
-
-    # 5. Mettre a jour automatiquement appsettings.json du serveur publie
-    $serverAppSettings = Join-Path $PSScriptRoot ".publish\Agent.Server\appsettings.json"
-    if (Test-Path $serverAppSettings) {
-        $json = Get-Content $serverAppSettings -Raw | ConvertFrom-Json
-        $json.Update.Hash        = $hash
-        $json.Update.DownloadUrl = "https://localhost:5001/updates/download/$zipName"
-        $json | ConvertTo-Json -Depth 10 | Set-Content $serverAppSettings -Encoding UTF8
-        Write-OK "appsettings.json du serveur mis a jour automatiquement."
-    }
-
-    # 6. Afficher ce qu'il faut mettre dans appsettings.json du serveur (source)
-    Write-Host ""
-    Write-Host "---------------------------------------------------" -ForegroundColor Green
-    Write-Host " Mets a jour appsettings.json du serveur (source) :" -ForegroundColor Green
-    Write-Host "---------------------------------------------------" -ForegroundColor Green
-    Write-Host "  `"Update`": {" -ForegroundColor White
-    Write-Host "    `"DownloadUrl`": `"https://localhost:5001/updates/download/$zipName`"," -ForegroundColor Yellow
-    Write-Host "    `"Hash`": `"$hash`"" -ForegroundColor Yellow
-    Write-Host "  }" -ForegroundColor White
-    Write-Host "---------------------------------------------------" -ForegroundColor Green
+    Write-OK "Mise a jour prete - le serveur calculera le hash automatiquement."
 }
 
 function Invoke-Reinstall {

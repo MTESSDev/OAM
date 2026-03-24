@@ -155,12 +155,14 @@ Agent.Service
                               BackupDir    ← dossier de sauvegarde (%TEMP%)
                               NewHash      ← hash à écrire après succès
 
-Agent.Updater (s'exécute en LocalSystem)
+Agent.Updater (s'exécute en LocalSystem, lancé détaché via cmd /c start)
   ├─ Arrêt du service Windows (attend max 60 s)
+  ├─ Arrêt de tous les processus Agent.TrayClient actifs
   ├─ Copie de sauvegarde du répertoire d'installation → BackupDir
   ├─ Copie des nouveaux fichiers → InstallDir (écrasement)
   ├─ Écriture du NewHash dans last-update.sha256
-  ├─ Redémarrage du service
+  ├─ Mise à jour du DisplayName et Description du service (depuis appsettings.json)
+  ├─ Redémarrage du service (attend max 60 s)
   └─ Échec à n'importe quelle étape
        └─ Restauration de BackupDir → InstallDir
           Redémarrage du service avec l'ancienne version
@@ -168,6 +170,7 @@ Agent.Updater (s'exécute en LocalSystem)
 
 **Garanties de sécurité du mécanisme :**
 - Le package n'est téléchargé que depuis l'URL retournée par le serveur interne
+- Le hash SHA-256 est **calculé dynamiquement par le serveur** à partir du fichier ZIP sur disque — aucune valeur de hash à maintenir manuellement
 - La vérification SHA-256 est faite **en mémoire** avant d'écrire le fichier sur disque — un package altéré ou corrompu en transit n'est jamais extrait
 - La sauvegarde automatique garantit qu'un échec d'installation ne laisse pas le poste sans service fonctionnel
 - Protection contre le path traversal côté serveur : le nom de fichier demandé est validé (rejet explicite de `/`, `\`, `..`)
@@ -179,7 +182,7 @@ Agent.Updater (s'exécute en LocalSystem)
 | Donnée | Emplacement | Contenu | Persistante |
 |---|---|---|---|
 | Hash de mise à jour | `<répertoire d'install>\last-update.sha256` | Chaîne hexadécimale SHA-256 du dernier package installé | Oui |
-| Logs applicatifs | Windows Event Log (journal : Application, source : MonServiceSecure) | Événements de démarrage, mise à jour, erreurs | Selon politique de rétention Windows |
+| Logs applicatifs | Windows Event Log (journal : Application, source : AgentOAM) | Événements de démarrage, mise à jour, erreurs | Selon politique de rétention Windows |
 
 **Aucune donnée personnelle, aucun contenu de dossier, aucun credential** n'est stocké sur le poste.
 
@@ -233,8 +236,8 @@ Ces données sont **purgées automatiquement** lors de la déconnexion du client
 | Élément | Valeur |
 |---|---|
 | Répertoire d'installation | Configurable via SMS |
-| Espace disque | ~30 Mo (hors runtime .NET 10 si déployé séparément) |
-| Prérequis | .NET 10 Runtime Windows x64 |
+| Espace disque | ~70 Mo (runtime .NET 10 embarqué — aucune installation préalable requise) |
+| Prérequis | Aucun (.NET inclus dans le package — self-contained win-x64) |
 | Processus actifs | `Agent.Service.exe` (session 0) + `Agent.TrayClient.exe` (1 par session utilisateur active) |
 | Ports ouverts en écoute sur le poste | **Aucun** |
 | Connexions réseau sortantes | 1 WebSocket HTTPS persistante (TrayClient → serveur) + 1 requête HTTP/h (Service → `/updates/check`) |
@@ -246,10 +249,10 @@ Ces données sont **purgées automatiquement** lors de la déconnexion du client
 ### Commandes d'installation
 
 ```bat
-sc create MonServiceSecure binPath= "C:\Program Files\OAM\Agent.Service.exe" start= auto DisplayName= "Agent OAM"
-sc config MonServiceSecure obj= "LocalSystem"
-sc description MonServiceSecure "Agent OAM - Surveillance et mise a jour"
-sc start MonServiceSecure
+sc create AgentOAM binPath= "C:\Program Files\OAM\Agent.Service.exe" start= auto DisplayName= "Agent OAM"
+sc config AgentOAM obj= "LocalSystem"
+sc description AgentOAM "Agent OAM - Outil d'aide à la mission"
+sc start AgentOAM
 ```
 
 Le script fourni (`Manage-AgentService.ps1 install`) exécute ces étapes avec vérification post-installation.
@@ -257,8 +260,8 @@ Le script fourni (`Manage-AgentService.ps1 install`) exécute ces étapes avec v
 ### Désinstallation propre
 
 ```bat
-sc stop MonServiceSecure
-sc delete MonServiceSecure
+sc stop AgentOAM
+sc delete AgentOAM
 ```
 
 ### Critères de détection pour SMS
@@ -266,7 +269,7 @@ sc delete MonServiceSecure
 | Méthode | Valeur |
 |---|---|
 | Fichier de présence | `<répertoire d'install>\Agent.Service.exe` |
-| Service Windows | Nom : `MonServiceSecure`, état : `Running` |
+| Service Windows | Nom : `AgentOAM`, état : `Running` |
 
 ---
 
