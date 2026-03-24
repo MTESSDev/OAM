@@ -1,9 +1,11 @@
 // TrayIconBuilder.cs
 // Construit l'icône du tray avec un point de statut (vert = connecté, rouge = déconnecté).
+// En mode SIDE_MODE, l'icône de base est teintée en rouge/orange pour distinguer du build prod.
 // L'icône de base est chargée depuis la ressource embarquée Resources/tray-base.png.
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -61,14 +63,20 @@ internal static class TrayIconBuilder
 
         // Icône de base redimensionnée à 32x32
         if (baseImg is not null)
+        {
+#if SIDE_MODE
+            g.DrawImage(TintRed(baseImg), 0, 0, 32, 32);
+#else
             g.DrawImage(baseImg, 0, 0, 32, 32);
+#endif
+        }
         else
             g.DrawIcon(SystemIcons.Application, new Rectangle(0, 0, 32, 32));
 
         // Point de statut — coin bas-droite
         Color dotColor = status == ConnectionStatus.Connected
             ? Color.FromArgb(0, 200, 83)   // vert
-            : Color.FromArgb(229, 57, 53);  // rouge
+            : Color.FromArgb(229, 57, 53); // rouge
 
         const int DotSize = 12;
         int x = 32 - DotSize - 1;
@@ -84,6 +92,33 @@ internal static class TrayIconBuilder
         NativeMethods.DestroyIcon(hIcon);
         return icon;
     }
+
+    // ── Teinte rouge (mode Side) ─────────────────────────────────────────────
+
+#if SIDE_MODE
+    /// <summary>Applique une teinte rouge à l'image de base pour distinguer visuellement le mode Side.</summary>
+    private static Bitmap TintRed(Bitmap src)
+    {
+        var tinted = new Bitmap(src.Width, src.Height);
+        // Matrice de couleur : boost canal rouge, réduction bleu/vert
+        float[][] matrix =
+        [
+            [1.5f, 0.0f, 0.0f, 0.0f, 0.0f],  // R
+            [0.0f, 0.4f, 0.0f, 0.0f, 0.0f],  // G
+            [0.0f, 0.0f, 0.4f, 0.0f, 0.0f],  // B
+            [0.0f, 0.0f, 0.0f, 1.0f, 0.0f],  // A
+            [0.0f, 0.0f, 0.0f, 0.0f, 1.0f],
+        ];
+        var colorMatrix  = new ColorMatrix(matrix);
+        var attrs        = new ImageAttributes();
+        attrs.SetColorMatrix(colorMatrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+
+        using var g = Graphics.FromImage(tinted);
+        g.DrawImage(src, new Rectangle(0, 0, src.Width, src.Height),
+            0, 0, src.Width, src.Height, GraphicsUnit.Pixel, attrs);
+        return tinted;
+    }
+#endif
 
     // ── P/Invoke ─────────────────────────────────────────────────────────────
 

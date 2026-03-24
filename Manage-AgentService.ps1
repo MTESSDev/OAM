@@ -6,7 +6,7 @@
     Build, installation, demarrage, arret, suppression et consultation des logs.
 #>
 param(
-    [ValidateSet("install","build","start","stop","reinstall","uninstall","status","logs","make-update","")]
+    [ValidateSet("install","build","start","stop","reinstall","uninstall","status","logs","make-update","make-side","")]
     [string]$Action = ""
 )
 
@@ -269,6 +269,27 @@ function Invoke-Reinstall {
     Invoke-Status
 }
 
+function Invoke-MakeSide {
+    Write-Header "Creation du build Side (TrayClient single-file self-contained)"
+
+    $sideDir = Join-Path $PSScriptRoot ".publish\side"
+    if (Test-Path $sideDir) { Remove-Item $sideDir -Recurse -Force }
+
+    dotnet publish $TrayProjectPath --configuration Side --output $sideDir
+    if ($LASTEXITCODE -ne 0) { Write-ERR "Publication echouee."; exit 1 }
+
+    # Toujours ecraser l'appsettings.json avec le template side (contient EnvironmentName)
+    $templateSrc  = Join-Path $PSScriptRoot "src\Agent.TrayClient\appsettings.side.json"
+    $templateDest = Join-Path $sideDir "appsettings.json"
+    if (Test-Path $templateSrc) {
+        Copy-Item $templateSrc $templateDest -Force
+        Write-INF "appsettings.json : configurez HubUrl et EnvironmentName avant de lancer."
+    }
+
+    Write-OK "Build Side cree : $sideDir"
+    Write-INF "Lancer : $sideDir\Agent.TrayClient.exe"
+}
+
 # ── Menu ───────────────────────────────────────────────────────────────────
 function Show-Menu {
     Write-Host ""
@@ -285,6 +306,7 @@ function Show-Menu {
     Write-Host "  8. Statut"
     Write-Host "  9. Voir les logs (50 derniers)"
     Write-Host "  U. Creer package de mise a jour (make-update)"
+    Write-Host "  S. Creer build Side TrayClient (make-side)"
     Write-Host "  Q. Quitter"
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Write-Host ""
@@ -301,6 +323,7 @@ switch ($Action.ToLower()) {
     "status"    { Invoke-Status }
     "logs"        { Invoke-Logs }
     "make-update" { Invoke-MakeUpdate }
+    "make-side"   { Invoke-MakeSide }
     default {
         do {
             Show-Menu
@@ -317,6 +340,8 @@ switch ($Action.ToLower()) {
                 "9" { Invoke-Logs }
                 "U" { Invoke-MakeUpdate }
                 "u" { Invoke-MakeUpdate }
+                "S" { Invoke-MakeSide }
+                "s" { Invoke-MakeSide }
                 "Q" { Write-Host "Au revoir." -ForegroundColor Cyan }
                 "q" { Write-Host "Au revoir." -ForegroundColor Cyan }
                 default { Write-INF "Choix invalide." }

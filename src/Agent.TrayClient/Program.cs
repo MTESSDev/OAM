@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.SignalR.Client;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,7 +18,11 @@ static class Program
     {
         ApplicationConfiguration.Initialize();
 
-        using var mutex = new Mutex(true, "MonAppTrayClient", out bool createdNew);
+#if SIDE_MODE
+        using var mutex = new Mutex(true, "AgentOAMTray-Side", out bool createdNew);
+#else
+        using var mutex = new Mutex(true, "AgentOAMTray", out bool createdNew);
+#endif
         if (!createdNew) return;
 
         Application.Run(new MyTrayContext());
@@ -34,6 +40,9 @@ public class MyTrayContext : ApplicationContext
     private System.Drawing.Icon? _currentIcon;
     // Annulé à chaque changement réseau pour déclencher une reconnexion immédiate
     private CancellationTokenSource _networkChangeCts = new();
+#if SIDE_MODE
+    private readonly string _envName;
+#endif
 
     public MyTrayContext()
     {
@@ -41,17 +50,31 @@ public class MyTrayContext : ApplicationContext
         // avant que le message loop soit démarré
         _ = _uiInvoker.Handle;
 
-        _trayIcon = new NotifyIcon()
-        {
-            Visible = true,
-            Text    = "Mon Service — Déconnecté"
-        };
+        _trayIcon = new NotifyIcon() { Visible = true, Text = "Agent OAM" };
 
         var menu = new ContextMenuStrip();
+
+#if SIDE_MODE
+        _envName        = ReadConfigValue("Agent", "EnvironmentName") ?? "Side";
+        string userName = $@"{Environment.UserDomainName}\{Environment.UserName}";
+
+        var lblEnv  = new ToolStripMenuItem(_envName)         { Enabled = false };
+        var lblUser = new ToolStripMenuItem($"[{userName}]")  { Enabled = false };
+        menu.Items.Add(lblEnv);
+        menu.Items.Add(lblUser);
+        menu.Items.Add(new ToolStripSeparator());
+#endif
+
         menu.Items.Add("Ouvrir le portail", null, (s, e) => OpenBrowser("https://mon-portail"));
+
+#if SIDE_MODE
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Quitter", null, (s, e) => { _cts.Cancel(); Application.Exit(); });
+#endif
+
         _trayIcon.ContextMenuStrip = menu;
 
-        // Icône initiale : rouge (pas encore connecté)
+        // Icône initiale : déconnecté
         SetIconAsync(ConnectionStatus.Disconnected);
 
         string? hubUrl = ReadHubUrl();
@@ -78,6 +101,10 @@ public class MyTrayContext : ApplicationContext
             System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += OnNetworkChanged;
 
             Task.Run(() => ConnectSignalRAsync(_cts.Token));
+
+#if SIDE_MODE
+        Task.Run(() => CheckSideVersionAsync(_cts.Token));
+#endif
         }
 
         //EnsureStartup();
@@ -159,8 +186,13 @@ public class MyTrayContext : ApplicationContext
                 _currentIcon   = newIcon;
                 _trayIcon.Icon = newIcon;
                 _trayIcon.Text = status == ConnectionStatus.Connected
-                    ? "Mon Service — Connecté"
-                    : "Mon Service — Déconnecté";
+#if SIDE_MODE
+                    ? $"Agent OAM [{_envName}] - Connecté"
+                    : $"Agent OAM [{_envName}] - Déconnecté";
+#else
+                    ? "Agent OAM - Connecté"
+                    : "Agent OAM - Déconnecté";
+#endif
                 old?.Dispose();
             });
         });
@@ -168,13 +200,56 @@ public class MyTrayContext : ApplicationContext
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private static string? ReadHubUrl()
+#if SIDE_MODE
+    private static readonly HttpClient _http = new(new HttpClientHandler { UseDefaultCredentials = true });
+
+    private async Task CheckSideVersionAsync(CancellationToken token)
+    {
+        try
+        {
+            string? checkUrl      = ReadConfigValue("Agent", "SideCheckUrl");
+            string? updatePageUrl = ReadConfigValue("Agent", "SideUpdatePageUrl");
+
+            if (string.IsNullOrEmpty(checkUrl)) return;
+
+            string? exePath = Environment.ProcessPath;
+            if (exePath is null || !File.Exists(exePath)) return;
+
+            string localHash;
+            using (var stream = File.OpenRead(exePath))
+                localHash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+
+            HttpResponseMessage response;
+            try { response = await _http.GetAsync(checkUrl, token); }
+            catch { return; }
+
+            if (!response.IsSuccessStatusCode) return;
+
+            string json        = await response.Content.ReadAsStringAsync(token);
+            string? serverHash = JsonNode.Parse(json)?["hash"]?.GetValue<string>();
+
+            if (serverHash is null || serverHash == localHash) return;
+
+            _uiInvoker.BeginInvoke(() =>
+            {
+                using var form = new SideUpdateForm(_envName, updatePageUrl ?? checkUrl);
+                form.ShowDialog();
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch { }
+    }
+#endif
+
+    private static string? ReadHubUrl() => ReadConfigValue("Agent", "HubUrl");
+
+    private static string? ReadConfigValue(string section, string key)
     {
         try
         {
             string path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
             if (!File.Exists(path)) return null;
-            return JsonNode.Parse(File.ReadAllText(path))?["Agent"]?["HubUrl"]?.GetValue<string>();
+            return JsonNode.Parse(File.ReadAllText(path))?[section]?[key]?.GetValue<string>();
         }
         catch { return null; }
     }

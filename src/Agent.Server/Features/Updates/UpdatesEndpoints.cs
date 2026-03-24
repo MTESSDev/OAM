@@ -1,8 +1,12 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using System;
 using System.IO;
+using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace Agent.Server.Features.Updates;
 
@@ -14,6 +18,8 @@ public static class UpdatesEndpoints
     {
         app.MapGet("/updates/check",              Check);
         app.MapGet("/updates/download/{filename}", Download);
+        app.MapGet("/updates/side/check",          SideCheck);
+        app.MapGet("/updates/side/download",      SideDownload);
     }
 
     private static IResult Check(HttpContext ctx)
@@ -28,6 +34,62 @@ public static class UpdatesEndpoints
         string downloadUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}/updates/download/{ZipFileName}";
 
         return Results.Ok(new { hash, downloadUrl });
+    }
+
+    private static IResult SideCheck()
+    {
+        string filePath = Path.Combine(AppContext.BaseDirectory, "updates", "side", "Agent.TrayClient.exe");
+
+        if (!File.Exists(filePath))
+            return Results.NotFound(new { error = "Aucun build side disponible." });
+
+        using var stream = File.OpenRead(filePath);
+        string hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+
+        return Results.Ok(new { hash });
+    }
+
+    private static IResult SideDownload(HttpContext ctx, IConfiguration config)
+    {
+        string exePath = Path.Combine(AppContext.BaseDirectory, "updates", "side", "Agent.TrayClient.exe");
+
+        if (!File.Exists(exePath))
+            return Results.NotFound(new { error = "Aucun build side disponible." });
+
+        string baseUrl         = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+        string hubUrl          = config["Side:HubUrl"]          ?? "";
+        string environmentName = config["Side:EnvironmentName"] ?? "";
+        string updatePageUrl   = config["Side:UpdatePageUrl"]   ?? $"{baseUrl}/side-update";
+        string checkUrl        = $"{baseUrl}/updates/side/check";
+
+        var appSettings = new
+        {
+            Agent = new
+            {
+                HubUrl            = hubUrl,
+                EnvironmentName   = environmentName,
+                SideCheckUrl      = checkUrl,
+                SideUpdatePageUrl = updatePageUrl,
+            }
+        };
+
+        string appSettingsJson = JsonSerializer.Serialize(appSettings, new JsonSerializerOptions { WriteIndented = true });
+
+        var zipStream = new MemoryStream();
+        using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var exeEntry = archive.CreateEntry("Agent.TrayClient.exe", CompressionLevel.NoCompression);
+            using (var entryStream = exeEntry.Open())
+            using (var fileStream  = File.OpenRead(exePath))
+                fileStream.CopyTo(entryStream);
+
+            var settingsEntry = archive.CreateEntry("appsettings.json", CompressionLevel.Fastest);
+            using var settingsStream = settingsEntry.Open();
+            settingsStream.Write(Encoding.UTF8.GetBytes(appSettingsJson));
+        }
+
+        zipStream.Position = 0;
+        return Results.File(zipStream, "application/zip", "AgentOAM-Side.zip");
     }
 
     private static IResult Download(string filename)
