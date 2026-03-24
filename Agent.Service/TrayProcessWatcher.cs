@@ -85,6 +85,7 @@ internal static class TrayProcessWatcher
                     continue;
                 }
 
+                KillExistingInstances(trayExePath, logger);
                 process = LaunchInUserSession(trayExePath, logger);
                 if (process is null)
                 {
@@ -104,6 +105,24 @@ internal static class TrayProcessWatcher
 
             if (!token.IsCancellationRequested)
                 await Task.Delay(2000, token);
+        }
+    }
+
+    // ── Nettoyage des instances existantes ──────────────────────────────────
+
+    private static void KillExistingInstances(string exePath, ILogger logger)
+    {
+        var processName = Path.GetFileNameWithoutExtension(exePath);
+        foreach (var p in Process.GetProcessesByName(processName))
+        {
+            try
+            {
+                logger.LogInformation("Instance TrayClient existante détectée (PID {Pid}), fermeture.", p.Id);
+                p.Kill();
+                p.WaitForExit(3000);
+            }
+            catch (Exception ex) { logger.LogWarning(ex, "Impossible de tuer le PID {Pid}.", p.Id); }
+            finally { p.Dispose(); }
         }
     }
 
