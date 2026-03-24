@@ -138,71 +138,100 @@ stages:
 
 | Palier | Serveur | Side disponible | SMS |
 |---|---|---|---|
-| **DEV** | `oam-dev.intranet` | Non | Non |
-| **QA / Acceptation** | `oam-qa.intranet` | Oui | Non |
+| **SAT** | `oam-sat.intranet` | Non | Non |
+| **ACCP** | `oam-accp.intranet` | Oui | Non |
+| **IT** | `oam-it.intranet` | Oui | Non |
 | **PROD** | `oam.intranet` | Non | Oui |
 
 ---
 
-### 2.2 Palier DEV
+### 2.2 Palier SAT
 
 **Déclenchement :** automatique sur chaque build de `master`
 
 **Étapes :**
 
-1. Déployer `drop-server` sur IIS `oam-dev.intranet`
-2. Transformer `appsettings.json` du serveur (variables DEV)
-3. Créer/s'assurer que le dossier `updates/` existe dans le répertoire IIS
+1. Déployer `drop-server` sur IIS `oam-sat.intranet`
+2. Transformer `appsettings.json` du serveur (variables SAT)
+3. S'assurer que le dossier `updates/` existe dans le répertoire IIS
 4. *(Optionnel)* Déposer `agent.zip` dans `updates/` pour tester la MAJ auto
 
-**Variables à substituer dans `Agent.Server/appsettings.json` :**
+**Variables `Agent.Server/appsettings.json` :**
 
-| Clé | Valeur DEV |
+| Clé | Valeur SAT |
 |---|---|
-| `Side:HubUrl` | `https://oam-dev.intranet/hub/user` |
-| `Side:EnvironmentName` | `DEV` |
-| `Side:UpdatePageUrl` | `https://oam-dev.intranet/side-update` |
+| `Side:HubUrl` | `https://oam-sat.intranet/hub/user` |
+| `Side:EnvironmentName` | `SAT` |
+| `Side:UpdatePageUrl` | `https://oam-sat.intranet/side-update` |
 
-**Variables à substituer dans `Agent.Service/appsettings.json` :**
+**Variables `Agent.Service/appsettings.json` :**
 
-| Clé | Valeur DEV |
+| Clé | Valeur SAT |
 |---|---|
-| `Agent:UpdateUrl` | `https://oam-dev.intranet/updates/check` |
-| `Agent:PortalUrl` | `https://portail-dev.intranet` |
+| `Agent:UpdateUrl` | `https://oam-sat.intranet/updates/check` |
+| `Agent:PortalUrl` | `https://portail-sat.intranet` |
 
 ---
 
-### 2.3 Palier QA / Acceptation
+### 2.3 Palier ACCP
 
 **Déclenchement :** manuel (approbation requise)
 
 **Étapes :**
 
-1. Déployer `drop-server` sur IIS `oam-qa.intranet`
-2. Transformer `appsettings.json` du serveur (variables QA)
-3. Déposer `agent.zip` dans `<iis-root>/updates/` *(MAJ auto pour les agents QA)*
+1. Déployer `drop-server` sur IIS `oam-accp.intranet`
+2. Transformer `appsettings.json` du serveur (variables ACCP)
+3. Déposer `agent.zip` dans `<iis-root>/updates/` *(MAJ auto pour les agents ACCP)*
 4. **Déposer `drop-side/Agent.TrayClient.exe` dans `<iis-root>/updates/side/`** *(Side build)*
 
 **Variables `Agent.Server/appsettings.json` :**
 
-| Clé | Valeur QA |
+| Clé | Valeur ACCP |
 |---|---|
-| `Side:HubUrl` | `https://oam-qa.intranet/hub/user` |
+| `Side:HubUrl` | `https://oam-accp.intranet/hub/user` |
 | `Side:EnvironmentName` | `ACCEPTATION` |
-| `Side:UpdatePageUrl` | `https://oam-qa.intranet/side-update` |
+| `Side:UpdatePageUrl` | `https://oam-accp.intranet/side-update` |
 
 **Variables `Agent.Service/appsettings.json` :**
 
-| Clé | Valeur QA |
+| Clé | Valeur ACCP |
 |---|---|
-| `Agent:UpdateUrl` | `https://oam-qa.intranet/updates/check` |
-| `Agent:PortalUrl` | `https://portail-qa.intranet` |
+| `Agent:UpdateUrl` | `https://oam-accp.intranet/updates/check` |
+| `Agent:PortalUrl` | `https://portail-accp.intranet` |
 
-> Les agents QA téléchargent leur Side build via `GET /updates/side/download` — l'`appsettings.json` est généré dynamiquement par le serveur à partir de sa propre configuration.
+> Les agents ACCP téléchargent leur Side build via `GET /updates/side/download` — l'`appsettings.json` est généré dynamiquement par le serveur à partir de sa propre configuration.
 
 ---
 
-### 2.4 Palier PROD
+### 2.4 Palier IT
+
+**Déclenchement :** manuel (approbation requise)
+
+**Étapes :**
+
+1. Déployer `drop-server` sur IIS `oam-it.intranet`
+2. Transformer `appsettings.json` du serveur (variables IT)
+3. Déposer `agent.zip` dans `<iis-root>/updates/`
+4. **Déposer `drop-side/Agent.TrayClient.exe` dans `<iis-root>/updates/side/`** *(Side build)*
+
+**Variables `Agent.Server/appsettings.json` :**
+
+| Clé | Valeur IT |
+|---|---|
+| `Side:HubUrl` | `https://oam-it.intranet/hub/user` |
+| `Side:EnvironmentName` | `IT` |
+| `Side:UpdatePageUrl` | `https://oam-it.intranet/side-update` |
+
+**Variables `Agent.Service/appsettings.json` :**
+
+| Clé | Valeur IT |
+|---|---|
+| `Agent:UpdateUrl` | `https://oam-it.intranet/updates/check` |
+| `Agent:PortalUrl` | `https://portail-it.intranet` |
+
+---
+
+### 2.5 Palier PROD
 
 **Déclenchement :** manuel avec double approbation
 
@@ -217,7 +246,7 @@ stages:
 
 | Clé | Valeur PROD |
 |---|---|
-| `Side:HubUrl` | *(laisser vide ou retirer — pas de Side en prod)* |
+| `Side:HubUrl` | *(laisser vide — pas de Side en PROD)* |
 | `Side:EnvironmentName` | *(idem)* |
 
 **Variables `Agent.Service/appsettings.json` :**
@@ -293,8 +322,9 @@ Les variables du release pipeline sont automatiquement mappées sur les clés JS
 
 ## 6. Checklist de mise en production
 
-- [ ] Build validé en DEV
-- [ ] Tests fonctionnels passés en QA (agents QA avec Side build)
+- [ ] Build validé en SAT
+- [ ] Tests fonctionnels passés en ACCP (agents avec Side build)
+- [ ] Validation IT effectuée
 - [ ] `appsettings.json` PROD validé (URLs, credentials)
 - [ ] Certificat SSL PROD valide et installé
 - [ ] Dossier `updates/` accessible en écriture par l'app pool

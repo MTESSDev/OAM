@@ -234,6 +234,8 @@ public class MyTrayContext : ApplicationContext
             {
                 using var form = new SideUpdateForm(_envName, updatePageUrl ?? checkUrl);
                 form.ShowDialog();
+                _cts.Cancel();
+                Application.Exit();
             });
         }
         catch (OperationCanceledException) { }
