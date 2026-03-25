@@ -4,8 +4,26 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <OutputType>WinExe</OutputType>
+    <ApplicationIcon>Resources\tray-base.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- Configuration Test : single-file auto-contenu avec comportement développeur/QA -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Test'">
+    <DefineConstants>TEST_MODE</DefineConstants>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <DebugType>none</DebugType>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Agent.Shared\Agent.Shared.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\tray-base.png" />
   </ItemGroup>
 </Project>

@@ -1,32 +1,28 @@
 // Worker.cs
-using Agent.Shared;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Diagnostics;
 using System.IO;
-using System.IO.Pipes;
-using System.Net.NetworkInformation;
+using System.IO.Compression;
+using System.Net.Http;
+using System.Net.Http.Json;
 using System.Runtime.Versioning;
-using System.Security.AccessControl;
-using System.Security.Principal;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Agent.Service;
 
 [SupportedOSPlatform("windows")]
-public partial class MainWorker : BackgroundService
+public class MainWorker : BackgroundService
 {
     private readonly ILogger<MainWorker> _logger;
-    private readonly HubConnection _hubConnection;
     private readonly string _updateUrl;
     private readonly string _trayExePath;
-    private NamedPipeServerStream? _pipeServer;
-
-    // Annulé à chaque changement réseau pour déclencher une reconnexion immédiate
-    private CancellationTokenSource _networkChangeCts = new();
+    private readonly string _hashFilePath;
+    private readonly HttpClient _http = new();
 
     public MainWorker(ILogger<MainWorker> logger, IConfiguration configuration)
     {
@@ -35,202 +31,188 @@ public partial class MainWorker : BackgroundService
             ?? throw new InvalidOperationException("Agent:UpdateUrl manquant dans la configuration.");
         var configuredPath = configuration["Agent:TrayClientPath"];
         _trayExePath = string.IsNullOrWhiteSpace(configuredPath)
-            ? Path.Combine(AppContext.BaseDirectory, "Agent.TrayClient.exe")
+            ? Path.Combine(AppContext.BaseDirectory, "tray", "Agent.TrayClient.exe")
             : configuredPath;
-
-        _hubConnection = new HubConnectionBuilder()
-            .WithUrl(configuration["Agent:HubUrl"]
-                ?? throw new InvalidOperationException("Agent:HubUrl manquant dans la configuration."))
-            .Build(); // Pas WithAutomaticReconnect : on gère nous-mêmes via Closed + réseau
-
-        _hubConnection.On<string>("OpenUrl", url => _ = BroadcastUrlToClient(url));
-        _hubConnection.On("CheckUpdate", async () => await CheckAndRunUpdate());
-
-        // Quand SignalR coupe, on relance immédiatement la boucle de reconnexion
-        _hubConnection.Closed += OnHubConnectionClosed;
+        _hashFilePath = Path.Combine(AppContext.BaseDirectory, "last-update.sha256");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
+        // 1. Maintenir le TrayClient en vie dans toutes les sessions actives
+        _ = Task.Run(() => TrayProcessWatcher.WatchAsync(_trayExePath, _logger, stoppingToken),
+            stoppingToken);
 
-        try
-        {
-            // 1. Surveiller et maintenir le TrayClient en vie dans la session utilisateur
-            _ = Task.Run(() => TrayProcessWatcher.WatchAsync(_trayExePath, _logger, stoppingToken),
-                stoppingToken);
+        // 2. Vérification de mise à jour immédiate au démarrage
+        await CheckAndRunUpdate(stoppingToken);
 
-            // 2. Démarrer le serveur IPC
-            _ = Task.Run(() => StartIpcServer(stoppingToken), stoppingToken);
-
-#if DEBUG
-            _ = Task.Run(async () =>
-            {
-                _logger.LogInformation("DEBUG: Simulation ouverture URL dans 10s...");
-                await Task.Delay(10000, stoppingToken);
-                await BroadcastUrlToClient("https://www.google.ca");
-            }, stoppingToken);
-#else
-            // 3. Connexion SignalR (boucle infinie, résiliente aux pannes réseau)
-            await ReconnectSignalRLoop(stoppingToken);
-
-            // 4. Maintenance journalière
-            using var timer = new PeriodicTimer(TimeSpan.FromHours(24));
-            while (await timer.WaitForNextTickAsync(stoppingToken))
-                await CheckAndRunUpdate();
-#endif
-        }
-        finally
-        {
-            NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
-            _networkChangeCts.Dispose();
-        }
-    }
-
-    // ── Surveillance réseau ──────────────────────────────────────────────────
-
-    private void OnNetworkAddressChanged(object? sender, EventArgs e)
-    {
-        // Réveille immédiatement la boucle de reconnexion SignalR en cours d'attente
-        var old = Interlocked.Exchange(ref _networkChangeCts, new CancellationTokenSource());
-        try { old.Cancel(); } finally { old.Dispose(); }
-
-        _logger.LogInformation("Changement réseau détecté — tentative de reconnexion SignalR.");
-    }
-
-    // ── SignalR ──────────────────────────────────────────────────────────────
-
-    private async Task OnHubConnectionClosed(Exception? ex)
-    {
-        if (ex is not null)
-            _logger.LogWarning(ex, "SignalR déconnecté de façon inattendue.");
-        else
-            _logger.LogInformation("SignalR fermé proprement.");
-
-        // La boucle de reconnexion sera reprise au prochain tick réseau ou immédiatement
-        OnNetworkAddressChanged(null, EventArgs.Empty);
-    }
-
-#pragma warning disable IDE0051 // Utilisé dans le bloc #else (Release uniquement)
-    /// <summary>
-    /// Boucle de reconnexion infinie.
-    /// - Retry immédiat si le réseau change (NetworkAddressChanged)
-    /// - Sinon attend jusqu'à 10s avant de réessayer
-    /// </summary>
-    private async Task ReconnectSignalRLoop(CancellationToken stoppingToken)
-    {
+        // 3. Vérification quotidienne dans la fenêtre de nuit (1h00–6h00)
+        // Délai aléatoire dans la fenêtre pour étaler la charge sur le serveur
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (_hubConnection.State == HubConnectionState.Connected)
-            {
-                await Task.Delay(1000, stoppingToken);
-                continue;
-            }
-
-            try
-            {
-                await _hubConnection.StartAsync(stoppingToken);
-
-                // S'enregistrer auprès du hub pour apparaître dans le registre serveur
-                string version = System.Reflection.Assembly
-                    .GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
-                await _hubConnection.InvokeAsync("RegisterAgent",
-                    Environment.MachineName, version, stoppingToken);
-
-                _logger.LogInformation("SignalR connecté et agent enregistré ({Machine} v{Version}).",
-                    Environment.MachineName, version);
-                return; // Connexion réussie — on sort, le Closed event reprend la main si besoin
-            }
-            catch (OperationCanceledException) { return; }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Reconnexion SignalR échouée. Attente avant retry...");
-
-                // Attend au plus 10s OU jusqu'au prochain événement réseau
-                using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(
-                    stoppingToken, _networkChangeCts.Token);
-
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(10), delayCts.Token);
-                }
-                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
-                {
-                    // Réseau disponible → on retente immédiatement (pas de délai)
-                    _logger.LogInformation("Réseau disponible — reconnexion SignalR immédiate.");
-                }
-            }
-        }
-    }
-
-#pragma warning restore IDE0051
-
-    // ── IPC (Service → TrayClient) ───────────────────────────────────────────
-
-    private async Task StartIpcServer(CancellationToken token)
-    {
-        while (!token.IsCancellationRequested)
-        {
-            try
-            {
-                // Utiliser le SID BUILTIN\Users (S-1-5-32-545) résolu localement,
-                // sans appel au contrôleur de domaine — évite l'erreur 1788.
-                var builtinUsers = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-                var pipeSecurity = new PipeSecurity();
-                pipeSecurity.AddAccessRule(new PipeAccessRule(
-                    builtinUsers, PipeAccessRights.ReadWrite, AccessControlType.Allow));
-
-                _pipeServer = NamedPipeServerStreamAcl.Create(
-                    AppConstants.PipeName,
-                    PipeDirection.Out,
-                    NamedPipeServerStream.MaxAllowedServerInstances,
-                    PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous,
-                    0, 0, pipeSecurity);
-
-                await _pipeServer.WaitForConnectionAsync(token);
-                _logger.LogInformation("TrayClient connecté au pipe IPC.");
-
-                // Attendre la déconnexion du client avant de recréer le serveur
-                while (_pipeServer.IsConnected && !token.IsCancellationRequested)
-                    await Task.Delay(500, token);
-            }
-            catch (OperationCanceledException) { break; }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Erreur serveur IPC, redémarrage...");
-                if (_pipeServer?.IsConnected == true) _pipeServer.Disconnect();
-            }
-        }
-    }
-
-    private async Task BroadcastUrlToClient(string url)
-    {
-        if (_pipeServer is { IsConnected: true })
-        {
-            try
-            {
-                using var writer = new BinaryWriter(_pipeServer, System.Text.Encoding.UTF8, leaveOpen: true);
-                writer.Write(AppConstants.CommandOpenUrl);
-                writer.Write(url);
-                await _pipeServer.FlushAsync();
-            }
-            catch (Exception ex) { _logger.LogError(ex, "Erreur IPC"); }
+            var delay = DelayUntilNextNightWindow();
+            _logger.LogInformation("Prochaine vérification de mise à jour dans {h}h{m:D2}.",
+                (int)delay.TotalHours, delay.Minutes);
+            await Task.Delay(delay, stoppingToken);
+            await CheckAndRunUpdate(stoppingToken);
         }
     }
 
     // ── Mise à jour ──────────────────────────────────────────────────────────
 
-    private async Task CheckAndRunUpdate()
+    private string ReadStoredHash()
     {
-        // 1. Check version API
-        // 2. Download ZIP to Temp
-        // 3. Extract to TempDir
-        // 4. Run Updater.exe
-        LogCheckingForUpdates(_updateUrl);
+        if (!File.Exists(_hashFilePath)) return string.Empty;
+        return File.ReadAllText(_hashFilePath).Trim().ToLowerInvariant();
     }
 
-    [LoggerMessage(Level = LogLevel.Information,
-        Message = "Vérification des mises à jour via {UpdateUrl}...")]
-    private partial void LogCheckingForUpdates(string updateUrl);
+    private async Task CheckAndRunUpdate(CancellationToken token)
+    {
+        try
+        {
+            // 1. Lire le hash local (celui du package actuellement installé)
+            string storedHash = ReadStoredHash();
+            _logger.LogInformation("Vérification des mises à jour (hash local : {Hash})...",
+                string.IsNullOrEmpty(storedHash) ? "(aucun)" : storedHash);
+
+            // 2. Interroger le serveur
+            var httpResponse = await _http.GetAsync(_updateUrl, token);
+
+            if (httpResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogInformation("Aucun package de mise à jour disponible sur le serveur.");
+                return;
+            }
+
+            httpResponse.EnsureSuccessStatusCode();
+
+            var response = await httpResponse.Content.ReadFromJsonAsync<UpdateCheckResponse>(cancellationToken: token);
+
+            if (response is null || string.IsNullOrWhiteSpace(response.Hash))
+            {
+                _logger.LogWarning("Réponse invalide du serveur de mise à jour.");
+                return;
+            }
+
+            string serverHash = response.Hash.Trim().ToLowerInvariant();
+
+            if (string.Equals(storedHash, serverHash, StringComparison.Ordinal))
+            {
+                _logger.LogInformation("Aucune mise à jour disponible (hash identique).");
+                return;
+            }
+
+            _logger.LogInformation("Mise à jour détectée. Hash serveur : {Hash}", serverHash);
+
+            // 3. Télécharger le ZIP
+            string tempZip = Path.Combine(Path.GetTempPath(), "OAM-update.zip");
+            _logger.LogInformation("Téléchargement depuis {Url}...", response.DownloadUrl);
+            byte[] zipBytes = await _http.GetByteArrayAsync(response.DownloadUrl, token);
+            await File.WriteAllBytesAsync(tempZip, zipBytes, token);
+
+            // 4. Vérifier le hash SHA-256 du fichier téléchargé
+            string actualHash = Convert.ToHexString(SHA256.HashData(zipBytes)).ToLowerInvariant();
+            if (!string.Equals(actualHash, serverHash, StringComparison.Ordinal))
+            {
+                _logger.LogError(
+                    "Hash SHA-256 invalide (attendu : {Expected}, reçu : {Actual}). Abandon.",
+                    serverHash, actualHash);
+                File.Delete(tempZip);
+                return;
+            }
+
+            // 5. Extraire le ZIP dans un dossier temp
+            string extractDir = Path.Combine(Path.GetTempPath(), "OAM-update");
+            if (Directory.Exists(extractDir)) Directory.Delete(extractDir, true);
+            ZipFile.ExtractToDirectory(tempZip, extractDir);
+            File.Delete(tempZip);
+            _logger.LogInformation("ZIP extrait dans {Dir}.", extractDir);
+
+            // 6. Lancer Agent.Updater depuis un dossier temp pour éviter qu'il s'écrase lui-même
+            string updaterSource = Path.Combine(AppContext.BaseDirectory, "Agent.Updater.exe");
+            if (!File.Exists(updaterSource))
+            {
+                _logger.LogError("Agent.Updater.exe introuvable : {Path}. Mise à jour annulée.", updaterSource);
+                return;
+            }
+
+            string backupDir  = Path.Combine(Path.GetTempPath(), "OAM-backup");
+            string installDir = AppContext.BaseDirectory.TrimEnd('\\', '/');
+
+            // Copie de l'updater en temp : il tourne hors de installDir et peut donc écraser sa propre source
+            // Agent.Updater est publié en single-file self-contained : un seul .exe suffit
+            string updaterTempDir = Path.Combine(Path.GetTempPath(), "OAM-updater");
+            Directory.CreateDirectory(updaterTempDir);
+            File.Copy(updaterSource, Path.Combine(updaterTempDir, "Agent.Updater.exe"), overwrite: true);
+
+            // cmd /c start lance le processus de façon détachée — il survit à l'arrêt du service parent
+            string updaterExe = Path.Combine(updaterTempDir, "Agent.Updater.exe");
+            string arguments  = $"\"AgentOAM\" \"{extractDir}\" \"{installDir}\" \"{backupDir}\" \"{serverHash}\"";
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName        = "cmd.exe",
+                Arguments       = $"/c start \"\" \"{updaterExe}\" {arguments}",
+                UseShellExecute = false,
+                CreateNoWindow  = true, 
+            });
+
+            _logger.LogInformation("Agent.Updater lancé (détaché). Le service va s'arrêter et redémarrer.");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erreur lors de la vérification/application de la mise à jour.");
+        }
+    }
+
+    /// <summary>
+    /// Calcule le délai jusqu'à un moment aléatoire dans la prochaine fenêtre de nuit (1h00–6h00).
+    /// Le délai aléatoire étale la charge sur le serveur quand plusieurs postes vérifient en même temps.
+    /// </summary>
+    private static TimeSpan DelayUntilNextNightWindow()
+    {
+        const int windowStartHour = 1;
+        const int windowEndHour   = 6;
+
+        var now        = DateTime.Now;
+        var windowMins = (windowEndHour - windowStartHour) * 60;
+        var offset     = TimeSpan.FromMinutes(Random.Shared.Next(0, windowMins));
+        var target     = now.Date.AddHours(windowStartHour).Add(offset);
+
+        if (target <= now)
+            target = target.AddDays(1);
+
+        return target - now;
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await base.StopAsync(cancellationToken);
+
+        foreach (var proc in Process.GetProcessesByName("Agent.TrayClient"))
+        {
+            try
+            {
+                proc.Kill();
+                _logger.LogInformation("Agent.TrayClient (PID {Pid}) arrêté avec le service.", proc.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Impossible d'arrêter Agent.TrayClient (PID {Pid}).", proc.Id);
+            }
+            finally
+            {
+                proc.Dispose();
+            }
+        }
+    }
+
+    public override void Dispose()
+    {
+        _http.Dispose();
+        base.Dispose();
+    }
 }
+
+// Réponse de GET /updates/check
+file record UpdateCheckResponse(string Hash, string DownloadUrl);

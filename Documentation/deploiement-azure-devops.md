@@ -1,0 +1,335 @@
+# Déploiement Azure DevOps — Agent OAM
+
+> **Destinataire :** Équipe DevOps / intégration continue
+> **Prérequis :** Azure DevOps avec agents self-hosted Windows (domaine), accès aux serveurs IIS cibles
+
+---
+
+## Vue d'ensemble
+
+OAM se compose de deux artefacts distincts à déployer :
+
+| Artefact | Destination | Responsable |
+|---|---|---|
+| **Agent.Server** | Serveur IIS par environnement | Pipeline CI/CD |
+| **agent.zip** | Postes agents via SMS | Pipeline CI/CD → SMS |
+| **Test build** | Déposé sur le serveur (dossier `updates/test/`) | Pipeline CI/CD |
+
+---
+
+## 1. Pipeline de build (`azure-pipelines.yml`)
+
+### 1.1 Vue d'ensemble des étapes
+
+```
+Build
+ ├── Publish Agent.Server          → artefact : drop-server
+ ├── Publish Agent.Service         → tmp
+ ├── Publish Agent.TrayClient      → tmp/tray
+ ├── Publish Agent.Updater         → tmp
+ ├── ZIP → agent.zip               → artefact : drop-agent
+ ├── Publish Agent.TrayClient Test → artefact : drop-test
+ └── Tests (si applicable)
+```
+
+### 1.2 Fichier `azure-pipelines.yml`
+
+```yaml
+trigger:
+  branches:
+    include:
+      - master
+
+variables:
+  buildConfiguration: 'Release'
+  dotnetVersion: '10.x'
+
+stages:
+
+# ── STAGE BUILD ────────────────────────────────────────────────────────────
+
+- stage: Build
+  jobs:
+  - job: BuildAll
+    steps:
+
+    - task: UseDotNet@2
+      inputs:
+        version: $(dotnetVersion)
+
+    # 1. Agent.Server
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Agent.Server'
+      inputs:
+        command: publish
+        projects: 'src/Agent.Server/Agent.Server.csproj'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/server'
+        publishWebProjects: false
+        zipAfterPublish: false
+
+    # 2. Agent.Service
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Agent.Service'
+      inputs:
+        command: publish
+        projects: 'src/Agent.Service/Agent.Service.csproj'
+        arguments: >
+          --configuration $(buildConfiguration)
+          --runtime win-x64
+          --self-contained
+          --output $(Agent.TempDirectory)/agent-pkg
+
+    # 3. Agent.TrayClient (Release) → sous-dossier tray\
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Agent.TrayClient'
+      inputs:
+        command: publish
+        projects: 'src/Agent.TrayClient/Agent.TrayClient.csproj'
+        arguments: >
+          --configuration $(buildConfiguration)
+          --runtime win-x64
+          --self-contained
+          --output $(Agent.TempDirectory)/agent-pkg/tray
+
+    # 4. Agent.Updater (single-file)
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Agent.Updater'
+      inputs:
+        command: publish
+        projects: 'src/Agent.Updater/Agent.Updater.csproj'
+        arguments: >
+          --configuration $(buildConfiguration)
+          --output $(Agent.TempDirectory)/agent-pkg
+
+    # 5. Créer agent.zip
+    - task: ArchiveFiles@2
+      displayName: 'Créer agent.zip'
+      inputs:
+        rootFolderOrFile: '$(Agent.TempDirectory)/agent-pkg'
+        includeRootFolder: false
+        archiveFile: '$(Build.ArtifactStagingDirectory)/agent/agent.zip'
+
+    # 6. Agent.TrayClient Test (single-file, TEST_MODE)
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Agent.TrayClient Test'
+      inputs:
+        command: publish
+        projects: 'src/Agent.TrayClient/Agent.TrayClient.csproj'
+        arguments: >
+          --configuration Test
+          --output $(Build.ArtifactStagingDirectory)/test
+
+    # Publier les artefacts
+    - publish: '$(Build.ArtifactStagingDirectory)/server'
+      artifact: drop-server
+
+    - publish: '$(Build.ArtifactStagingDirectory)/agent'
+      artifact: drop-agent
+
+    - publish: '$(Build.ArtifactStagingDirectory)/test'
+      artifact: drop-test
+```
+
+---
+
+## 2. Pipelines de release — par palier
+
+### 2.1 Environnements
+
+| Palier | Serveur | Test disponible | SMS |
+|---|---|---|---|
+| **SAT** | `oam-sat.intranet` | Non | Non |
+| **ACCP** | `oam-accp.intranet` | Oui | Non |
+| **IT** | `oam-it.intranet` | Oui | Non |
+| **PROD** | `oam.intranet` | Non | Oui |
+
+---
+
+### 2.2 Palier SAT
+
+**Déclenchement :** automatique sur chaque build de `master`
+
+**Étapes :**
+
+1. Déployer `drop-server` sur IIS `oam-sat.intranet`
+2. Transformer `appsettings.json` du serveur (variables SAT)
+3. S'assurer que le dossier `updates/` existe dans le répertoire IIS
+4. *(Optionnel)* Déposer `agent.zip` dans `updates/` pour tester la MAJ auto
+
+**Variables `Agent.Server/appsettings.json` :**
+
+| Clé | Valeur SAT |
+|---|---|
+| `Test:HubUrl` | `https://oam-sat.intranet/hub/user` |
+| `Test:EnvironmentName` | `SAT` |
+| `Test:UpdatePageUrl` | `https://oam-sat.intranet/test-update` |
+
+**Variables `Agent.Service/appsettings.json` :**
+
+| Clé | Valeur SAT |
+|---|---|
+| `Agent:UpdateUrl` | `https://oam-sat.intranet/updates/check` |
+| `Agent:PortalUrl` | `https://portail-sat.intranet` |
+
+---
+
+### 2.3 Palier ACCP
+
+**Déclenchement :** manuel (approbation requise)
+
+**Étapes :**
+
+1. Déployer `drop-server` sur IIS `oam-accp.intranet`
+2. Transformer `appsettings.json` du serveur (variables ACCP)
+3. Déposer `agent.zip` dans `<iis-root>/updates/` *(MAJ auto pour les agents ACCP)*
+4. **Déposer `drop-test/Agent.TrayClient.exe` dans `<iis-root>/updates/test/`** *(Test build)*
+
+**Variables `Agent.Server/appsettings.json` :**
+
+| Clé | Valeur ACCP |
+|---|---|
+| `Test:HubUrl` | `https://oam-accp.intranet/hub/user` |
+| `Test:EnvironmentName` | `ACCEPTATION` |
+| `Test:UpdatePageUrl` | `https://oam-accp.intranet/test-update` |
+
+**Variables `Agent.Service/appsettings.json` :**
+
+| Clé | Valeur ACCP |
+|---|---|
+| `Agent:UpdateUrl` | `https://oam-accp.intranet/updates/check` |
+| `Agent:PortalUrl` | `https://portail-accp.intranet` |
+
+> Les agents ACCP téléchargent leur Test build via `GET /updates/test/download` — l'`appsettings.json` est généré dynamiquement par le serveur à partir de sa propre configuration.
+
+---
+
+### 2.4 Palier IT
+
+**Déclenchement :** manuel (approbation requise)
+
+**Étapes :**
+
+1. Déployer `drop-server` sur IIS `oam-it.intranet`
+2. Transformer `appsettings.json` du serveur (variables IT)
+3. Déposer `agent.zip` dans `<iis-root>/updates/`
+4. **Déposer `drop-test/Agent.TrayClient.exe` dans `<iis-root>/updates/test/`** *(Test build)*
+
+**Variables `Agent.Server/appsettings.json` :**
+
+| Clé | Valeur IT |
+|---|---|
+| `Test:HubUrl` | `https://oam-it.intranet/hub/user` |
+| `Test:EnvironmentName` | `IT` |
+| `Test:UpdatePageUrl` | `https://oam-it.intranet/test-update` |
+
+**Variables `Agent.Service/appsettings.json` :**
+
+| Clé | Valeur IT |
+|---|---|
+| `Agent:UpdateUrl` | `https://oam-it.intranet/updates/check` |
+| `Agent:PortalUrl` | `https://portail-it.intranet` |
+
+---
+
+### 2.5 Palier PROD
+
+**Déclenchement :** manuel avec double approbation
+
+**Étapes :**
+
+1. Déployer `drop-server` sur IIS `oam.intranet`
+2. Transformer `appsettings.json` du serveur (variables PROD)
+3. **Publier `agent.zip` dans `<iis-root>/updates/`** → déclenche la MAJ auto sur tous les postes agents (nuit suivante, entre 1h et 6h)
+4. *(Parallèle)* Fournir `agent.zip` à l'équipe SMS pour déploiement sur les nouveaux postes
+
+**Variables `Agent.Server/appsettings.json` :**
+
+| Clé | Valeur PROD |
+|---|---|
+| `Test:HubUrl` | *(laisser vide — pas de Test en PROD)* |
+| `Test:EnvironmentName` | *(idem)* |
+
+**Variables `Agent.Service/appsettings.json` :**
+
+| Clé | Valeur PROD |
+|---|---|
+| `Agent:UpdateUrl` | `https://oam.intranet/updates/check` |
+| `Agent:PortalUrl` | `https://portail.intranet` |
+
+---
+
+## 3. Transformation des fichiers de configuration
+
+Utiliser la tâche **FileTransform** (ou `jsonPatch`) pour substituer les valeurs par environnement.
+
+```yaml
+- task: FileTransform@2
+  displayName: 'Transformer appsettings.json (Server)'
+  inputs:
+    folderPath: '$(Pipeline.Workspace)/drop-server'
+    jsonTargetFiles: '**/appsettings.json'
+```
+
+Les variables du release pipeline sont automatiquement mappées sur les clés JSON via la notation pointée : `Test.HubUrl`, `Test.EnvironmentName`, etc.
+
+> Définir ces variables dans les **variable groups** Azure DevOps par environnement (Library → Variable groups), et lier chaque stage au bon groupe.
+
+---
+
+## 4. Infrastructure IIS requise
+
+### Prérequis sur le serveur IIS
+
+- Windows Server joint au domaine Active Directory
+- .NET Hosting Bundle installé (version correspondant au `TargetFramework` du projet)
+- Module IIS `WindowsAuthentication` activé
+- Site IIS configuré avec :
+  - **Authentication :** Windows Authentication activé, Anonymous désactivé
+  - **Application Pool :** `No Managed Code`, identité = compte de service AD (pour Negotiate)
+- Certificat SSL valide (wildcard ou SAN couvrant le FQDN)
+
+### Structure des dossiers IIS
+
+```
+<iis-root>/
+  Agent.Server.exe
+  appsettings.json        ← transformé par le pipeline
+  updates/
+    agent.zip             ← déposé par le pipeline release
+    test/
+      Agent.TrayClient.exe  ← déposé par le pipeline release (QA seulement)
+```
+
+### Permissions
+
+| Dossier | Compte | Droits |
+|---|---|---|
+| `<iis-root>/` | Compte app pool | Lecture |
+
+
+---
+
+## 5. Stratégie de mise à jour sur les postes agents
+
+| Scénario | Mécanisme |
+|---|---|
+| Nouveau poste | SMS déploie `agent.zip` + installation via script |
+| Poste existant | Service vérifie chaque nuit → télécharge + applique automatiquement |
+| Urgence (forcer MAJ) | Déposer le nouveau `agent.zip` dans `updates/` → les postes se mettront à jour la nuit même |
+| Rollback | Remplacer `agent.zip` par l'ancienne version → MAJ automatique vers l'ancienne version la nuit suivante |
+
+---
+
+## 6. Checklist de mise en production
+
+- [ ] Build validé en SAT
+- [ ] Tests fonctionnels passés en ACCP (agents avec Test build)
+- [ ] Validation IT effectuée
+- [ ] `appsettings.json` PROD validé (URLs, credentials)
+- [ ] Certificat SSL PROD valide et installé
+- [ ] Dossier `updates/` accessible en écriture par l'app pool
+- [ ] Approbation release PROD (double)
+- [ ] Déploiement serveur effectué
+- [ ] `agent.zip` déposé dans `updates/`
+- [ ] Vérification : `GET /updates/check` retourne un hash
+- [ ] Notification à l'équipe SMS si nouveaux postes à déployer

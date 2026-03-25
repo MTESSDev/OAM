@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Agent OAM – Installation</title>
+
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/open-sans-v18-latin-regular.woff2" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/open-sans-v18-latin-600.woff2" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/open-sans-v18-latin-700.woff2" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/roboto-v20-latin-regular.woff2" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/roboto-v20-latin-500.woff2" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/roboto-v20-latin-700.woff2" type="font/woff2" crossorigin="anonymous">
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/css/utd-webcomponents.min.css">
+</head>
+<body>
+  <noscript>JavaScript doit être activé pour afficher cette page correctement.</noscript>
+
+  <div class="utd-conteneur-principal">
+    <header>
+      <utd-piv-entete
+        id="pivEntete"
+        titre-site1="Agent OAM"
+        alt-logo="Signature du gouvernement du Québec. Accédez à Agent OAM.">
+      </utd-piv-entete>
+    </header>
+
+    <div class="utd-container">
+      <main id="main">
+        <h1>Installation de l'Agent OAM (mode test)</h1>
+
+        <p class="utd-largeur-max-zone-texte">
+          L'Agent OAM est un outil installé sur votre poste qui permet à l'équipe de vous envoyer
+          des actions en temps réel lors des sessions de test (ex. : ouvrir automatiquement une
+          page dans votre navigateur). Il s'exécute en arrière-plan et est visible uniquement
+          par son icône dans la barre des tâches.
+        </p>
+
+        <utd-avis
+          type="information"
+          titre="Aucun droit administrateur requis"
+          contenu="L'agent en mode test ne s'installe pas comme service Windows. Il suffit de télécharger et lancer le script d'installation."
+          class="mt-16 mb-32">
+        </utd-avis>
+
+        <h2>Télécharger et installer</h2>
+
+        <p>Le script télécharge automatiquement l'agent, l'installe dans <code class="utd-emphase-gris">C:\ProgramData\OAM-Test\ACCEPTATION\</code>, crée un raccourci sur votre bureau et démarre l'agent.</p>
+
+        <p>
+          <a href="/updates/test/installer" class="utd-btn primaire">
+            Télécharger l'installateur (PowerShell)
+          </a>
+        </p>
+
+        <h2 class="mt-48">Étapes d'installation</h2>
+
+        <ol>
+          <li class="mb-16">
+            <strong>Lancer le script</strong><br>
+            Clic droit sur <code class="utd-emphase-gris">Install-AgentOAM-ACCEPTATION.ps1</code>
+            → <strong>Exécuter avec PowerShell</strong><br>
+            Le script s'occupe de tout : téléchargement, extraction et création du raccourci sur le bureau.
+            <utd-avis
+              type="information"
+              titre="Mises à jour futures"
+              contenu="Pour mettre à jour, relancez simplement le même script — il arrête l'agent en cours, remplace les fichiers et met à jour le raccourci."
+              class="mt-16">
+            </utd-avis>
+          </li>
+          <li class="mb-16">
+            <strong>Vérifier la présence de l'icône</strong><br>
+            Une icône rouge apparaît dans la zone de notification (en bas à droite, près de l'horloge).
+            Si elle n'est pas visible, cliquez sur la flèche <strong>∧</strong> pour afficher les icônes cachées.
+            <ul class="mt-16">
+              <li><utd-pastille couleur="vert" class="mr-8"></utd-pastille> <strong>Point vert</strong> — connecté au serveur</li>
+              <li><utd-pastille couleur="rouge" class="mr-8"></utd-pastille> <strong>Point rouge</strong> — déconnecté (réseau, VPN, serveur indisponible)</li>
+            </ul>
+            <utd-avis
+              type="avertissement"
+              titre="Icône rouge au démarrage"
+              contenu="Il est normal que le point soit rouge quelques secondes au démarrage, le temps que la connexion s'établisse. S'il reste rouge, vérifiez votre connexion réseau ou VPN."
+              class="mt-16">
+            </utd-avis>
+          </li>
+        </ol>
+
+        <h2 class="mt-48">Lancer l'agent en tant qu'un utilisateur de test</h2>
+
+        <p>
+          Pour simuler la session d'un agent terrain, vous pouvez lancer l'outil sous un compte utilisateur de test
+          (ex. <code class="utd-emphase-gris">MES\ESAC763</code>) sans ouvrir une session Windows distincte.
+        </p>
+
+        <ol>
+          <li class="mb-16">
+            Dans l'Explorateur Windows, naviguez jusqu'à <code class="utd-emphase-gris">C:\ProgramData\OAM-Test\ACCEPTATION\</code>
+          </li>
+          <li class="mb-16">
+            Maintenez la touche <kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 5px;">Maj</kbd> enfoncée,
+            puis faites un <strong>clic droit</strong> sur l'exécutable<br>
+            (ex. <code class="utd-emphase-gris">Agent.TrayClient.ACCEPTATION.exe</code>)
+          </li>
+          <li class="mb-16">
+            Dans le menu contextuel, cliquez sur <strong>Exécuter en tant qu'autre utilisateur</strong>
+          </li>
+          <li class="mb-16">
+            Dans la fenêtre qui s'ouvre, entrez les informations du compte de test :<br>
+            <ul class="mt-8">
+              <li>Nom d'utilisateur : <code class="utd-emphase-gris">MES\ESAC763</code></li>
+              <li>Mot de passe : le mot de passe du compte de test</li>
+            </ul>
+          </li>
+          <li>Cliquez sur <strong>OK</strong> — l'icône de l'agent apparaît dans la barre des tâches sous l'identité de ce compte.</li>
+        </ol>
+
+        <utd-avis
+          type="information"
+          titre="L'agent s'enregistre avec l'identité du compte de test"
+          contenu="Le serveur recevra la connexion au nom de MES\ESAC763. C'est ce compte qui apparaîtra dans le portail de gestion lors des tests."
+          class="mt-16">
+        </utd-avis>
+
+        <utd-avis
+          type="avertissement"
+          titre="Une seule instance à la fois, peu importe le compte"
+          contenu="Si l'agent est déjà en cours d'exécution sous votre propre session Windows, lancer une deuxième instance sous un compte de test ne fonctionnera pas — les deux partagent la même session et le même verrou. Quittez l'instance en cours avant d'en démarrer une autre sous un compte différent."
+          class="mt-16">
+        </utd-avis>
+
+        <h2 class="mt-48">Quitter l'agent</h2>
+
+        <p>Clic droit sur l'icône dans la barre des tâches → <strong>Quitter</strong>.</p>
+
+        <utd-avis
+          type="complementaire"
+          sous-type="astuce"
+          titre="Une seule instance à la fois"
+          contenu="Si vous tentez de lancer l'agent une deuxième fois alors qu'il est déjà actif, rien ne se passera — c'est normal. Quittez d'abord l'instance en cours via le menu clic droit."
+          class="mt-16">
+        </utd-avis>
+
+        <h2 class="mt-48">Besoin d'aide ?</h2>
+
+        <p>Contactez l'équipe de développement SPFS.</p>
+
+      </main>
+    </div>
+  </div>
+
+  <utd-hautpage id="hautPage"></utd-hautpage>
+
+  <footer class="utd">
+    <utd-pied-page-site id="piedPageSite"></utd-pied-page-site>
+    <utd-piv-pied-page id="pivPiedPage">
+      <div slot="liens">
+        <ul>
+          <li><a href="/swagger">API Swagger</a></li>
+        </ul>
+      </div>
+    </utd-piv-pied-page>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/js/utd-webcomponents.min.js"></script>
+  <script>
+    utd.ajusterAccessibiliteLiens();
+  </script>
+</body>
+</html>

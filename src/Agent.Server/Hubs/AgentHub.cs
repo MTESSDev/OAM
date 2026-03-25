@@ -8,8 +8,8 @@ using System.Threading.Tasks;
 namespace Agent.Server.Hubs;
 
 /// <summary>
-/// Hub SignalR auquel chaque instance de Agent.Service se connecte.
-/// Toutes les commandes serveur → agent transitent par ici.
+/// Hub dédié aux connexions Agent.Service (LocalSystem, anonyme).
+/// Gère l'enregistrement machine et les commandes de mise à jour.
 /// </summary>
 public class AgentHub : Hub
 {
@@ -19,14 +19,9 @@ public class AgentHub : Hub
     public AgentHub(IAgentRegistry registry, ILogger<AgentHub> logger)
     {
         _registry = registry;
-        _logger = logger;
+        _logger   = logger;
     }
 
-    // ── Appelé par l'agent à chaque (re)connexion ────────────────────────────
-
-    /// <summary>
-    /// Enregistre l'agent dans le registre et l'ajoute au groupe "agents".
-    /// </summary>
     public async Task RegisterAgent(string machineName, string version)
     {
         _registry.Register(Context.ConnectionId, machineName, version);
@@ -35,14 +30,13 @@ public class AgentHub : Hub
             machineName, version, Context.ConnectionId);
     }
 
-    // ── Cycle de vie ─────────────────────────────────────────────────────────
-
     public override Task OnDisconnectedAsync(Exception? exception)
     {
-        var info = _registry.Unregister(Context.ConnectionId);
-        if (info is not null)
+        var agent = _registry.Unregister(Context.ConnectionId);
+        if (agent is not null)
             _logger.LogWarning("Agent déconnecté : {Machine} ({ConnId})",
-                info.MachineName, Context.ConnectionId);
+                agent.MachineName, Context.ConnectionId);
+
         return base.OnDisconnectedAsync(exception);
     }
 }
