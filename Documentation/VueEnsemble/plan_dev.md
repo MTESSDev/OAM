@@ -181,3 +181,9 @@ Voici le tableau en format Markdown brut :
 | Assertions/Tests/LIVE QA | `mtessdev/mdat` |
 
 
+## 8. Skills supplémentaires
+
+- UTD
+- mdat
+- yamlHttpClient
+
