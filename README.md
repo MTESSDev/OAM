@@ -49,15 +49,15 @@ Le service vérifie une fois au démarrage puis chaque nuit (entre 1h et 6h, heu
 3. `Agent.Updater.exe` est copié dans `%TEMP%\OAM-updater\` puis lancé en processus détaché
 4. L'updater arrête le service, remplace les fichiers, met à jour le DisplayName/Description Windows si nécessaire, redémarre
 
-## Mode Side (dev / QA)
+## Mode Test (dev / QA)
 
-Le `Agent.TrayClient` peut être compilé en configuration **Side** (`--configuration Side`) pour les agents de QA ou les développeurs qui travaillent sur un environnement séparé.
+Le `Agent.TrayClient` peut être compilé en configuration **Test** (`--configuration Test`) pour les agents de QA ou les développeurs qui travaillent sur un environnement séparé.
 
 - Icône rouge (distincte de la prod)
 - Nom de l'environnement et utilisateur affichés dans le menu
 - Option "Quitter" disponible
 - Vérification de version au démarrage — bloque l'utilisation si le build n'est plus à jour
-- Distribué via `GET /updates/side/download` : génère un ZIP à la volée avec l'exe et l'`appsettings.json` pré-configuré pour l'environnement
+- Distribué via `GET /updates/test/download` : génère un ZIP à la volée avec l'exe et l'`appsettings.json` pré-configuré pour l'environnement
 
 ## Structure du dépôt
 
@@ -80,8 +80,8 @@ Manage-AgentService.ps1  Script PowerShell de gestion locale (build, install, up
 # Créer un package de mise à jour (agent.zip)
 .\Manage-AgentService.ps1 -Action make-update
 
-# Créer un build Side pour QA
-.\Manage-AgentService.ps1 -Action make-side
+# Créer un build Test pour QA
+.\Manage-AgentService.ps1 -Action make-test
 ```
 
 > Requiert PowerShell en mode administrateur.

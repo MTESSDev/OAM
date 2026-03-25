@@ -6,7 +6,7 @@
     Build, installation, demarrage, arret, suppression et consultation des logs.
 #>
 param(
-    [ValidateSet("install","build","start","stop","reinstall","uninstall","status","logs","make-update","make-side","")]
+    [ValidateSet("install","build","start","stop","reinstall","uninstall","status","logs","make-update","make-test","")]
     [string]$Action = ""
 )
 
@@ -269,25 +269,25 @@ function Invoke-Reinstall {
     Invoke-Status
 }
 
-function Invoke-MakeSide {
-    Write-Header "Creation du build Side (TrayClient single-file self-contained)"
+function Invoke-MakeTest {
+    Write-Header "Creation du build Test (TrayClient single-file self-contained)"
 
-    $sideDir = Join-Path $PSScriptRoot ".publish\side"
-    if (Test-Path $sideDir) { Remove-Item $sideDir -Recurse -Force }
+    $testDir = Join-Path $PSScriptRoot ".publish\test"
+    if (Test-Path $testDir) { Remove-Item $testDir -Recurse -Force }
 
-    dotnet publish $TrayProjectPath --configuration Side --output $sideDir
+    dotnet publish $TrayProjectPath --configuration Test --output $testDir
     if ($LASTEXITCODE -ne 0) { Write-ERR "Publication echouee."; exit 1 }
 
-    # Toujours ecraser l'appsettings.json avec le template side (contient EnvironmentName)
-    $templateSrc  = Join-Path $PSScriptRoot "src\Agent.TrayClient\appsettings.side.json"
-    $templateDest = Join-Path $sideDir "appsettings.json"
+    # Toujours ecraser l'appsettings.json avec le template test (contient EnvironmentName)
+    $templateSrc  = Join-Path $PSScriptRoot "src\Agent.TrayClient\appsettings.test.json"
+    $templateDest = Join-Path $testDir "appsettings.json"
     if (Test-Path $templateSrc) {
         Copy-Item $templateSrc $templateDest -Force
         Write-INF "appsettings.json : configurez HubUrl et EnvironmentName avant de lancer."
     }
 
-    Write-OK "Build Side cree : $sideDir"
-    Write-INF "Lancer : $sideDir\Agent.TrayClient.exe"
+    Write-OK "Build Test cree : $testDir"
+    Write-INF "Lancer : $testDir\Agent.TrayClient.exe"
 }
 
 # ── Menu ───────────────────────────────────────────────────────────────────
@@ -306,7 +306,7 @@ function Show-Menu {
     Write-Host "  8. Statut"
     Write-Host "  9. Voir les logs (50 derniers)"
     Write-Host "  U. Creer package de mise a jour (make-update)"
-    Write-Host "  S. Creer build Side TrayClient (make-side)"
+    Write-Host "  T. Creer build Test TrayClient (make-test)"
     Write-Host "  Q. Quitter"
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Write-Host ""
@@ -323,7 +323,7 @@ switch ($Action.ToLower()) {
     "status"    { Invoke-Status }
     "logs"        { Invoke-Logs }
     "make-update" { Invoke-MakeUpdate }
-    "make-side"   { Invoke-MakeSide }
+    "make-test"   { Invoke-MakeTest }
     default {
         do {
             Show-Menu
@@ -340,8 +340,8 @@ switch ($Action.ToLower()) {
                 "9" { Invoke-Logs }
                 "U" { Invoke-MakeUpdate }
                 "u" { Invoke-MakeUpdate }
-                "S" { Invoke-MakeSide }
-                "s" { Invoke-MakeSide }
+                "T" { Invoke-MakeTest }
+                "t" { Invoke-MakeTest }
                 "Q" { Write-Host "Au revoir." -ForegroundColor Cyan }
                 "q" { Write-Host "Au revoir." -ForegroundColor Cyan }
                 default { Write-INF "Choix invalide." }

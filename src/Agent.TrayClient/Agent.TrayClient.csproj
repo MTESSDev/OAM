@@ -7,9 +7,9 @@
     <ApplicationIcon>Resources\tray-base.ico</ApplicationIcon>
   </PropertyGroup>
 
-  <!-- Configuration Side : single-file auto-contenu avec comportement développeur/QA -->
-  <PropertyGroup Condition="'$(Configuration)' == 'Side'">
-    <DefineConstants>SIDE_MODE</DefineConstants>
+  <!-- Configuration Test : single-file auto-contenu avec comportement développeur/QA -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Test'">
+    <DefineConstants>TEST_MODE</DefineConstants>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

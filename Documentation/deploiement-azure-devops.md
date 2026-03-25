@@ -13,7 +13,7 @@ OAM se compose de deux artefacts distincts à déployer :
 |---|---|---|
 | **Agent.Server** | Serveur IIS par environnement | Pipeline CI/CD |
 | **agent.zip** | Postes agents via SMS | Pipeline CI/CD → SMS |
-| **Side build** | Déposé sur le serveur (dossier `updates/side/`) | Pipeline CI/CD |
+| **Test build** | Déposé sur le serveur (dossier `updates/test/`) | Pipeline CI/CD |
 
 ---
 
@@ -28,7 +28,7 @@ Build
  ├── Publish Agent.TrayClient      → tmp/tray
  ├── Publish Agent.Updater         → tmp
  ├── ZIP → agent.zip               → artefact : drop-agent
- ├── Publish Agent.TrayClient Side → artefact : drop-side
+ ├── Publish Agent.TrayClient Test → artefact : drop-test
  └── Tests (si applicable)
 ```
 
@@ -109,15 +109,15 @@ stages:
         includeRootFolder: false
         archiveFile: '$(Build.ArtifactStagingDirectory)/agent/agent.zip'
 
-    # 6. Agent.TrayClient Side (single-file, SIDE_MODE)
+    # 6. Agent.TrayClient Test (single-file, TEST_MODE)
     - task: DotNetCoreCLI@2
-      displayName: 'Publish Agent.TrayClient Side'
+      displayName: 'Publish Agent.TrayClient Test'
       inputs:
         command: publish
         projects: 'src/Agent.TrayClient/Agent.TrayClient.csproj'
         arguments: >
-          --configuration Side
-          --output $(Build.ArtifactStagingDirectory)/side
+          --configuration Test
+          --output $(Build.ArtifactStagingDirectory)/test
 
     # Publier les artefacts
     - publish: '$(Build.ArtifactStagingDirectory)/server'
@@ -126,8 +126,8 @@ stages:
     - publish: '$(Build.ArtifactStagingDirectory)/agent'
       artifact: drop-agent
 
-    - publish: '$(Build.ArtifactStagingDirectory)/side'
-      artifact: drop-side
+    - publish: '$(Build.ArtifactStagingDirectory)/test'
+      artifact: drop-test
 ```
 
 ---
@@ -136,7 +136,7 @@ stages:
 
 ### 2.1 Environnements
 
-| Palier | Serveur | Side disponible | SMS |
+| Palier | Serveur | Test disponible | SMS |
 |---|---|---|---|
 | **SAT** | `oam-sat.intranet` | Non | Non |
 | **ACCP** | `oam-accp.intranet` | Oui | Non |
@@ -160,9 +160,9 @@ stages:
 
 | Clé | Valeur SAT |
 |---|---|
-| `Side:HubUrl` | `https://oam-sat.intranet/hub/user` |
-| `Side:EnvironmentName` | `SAT` |
-| `Side:UpdatePageUrl` | `https://oam-sat.intranet/side-update` |
+| `Test:HubUrl` | `https://oam-sat.intranet/hub/user` |
+| `Test:EnvironmentName` | `SAT` |
+| `Test:UpdatePageUrl` | `https://oam-sat.intranet/test-update` |
 
 **Variables `Agent.Service/appsettings.json` :**
 
@@ -182,15 +182,15 @@ stages:
 1. Déployer `drop-server` sur IIS `oam-accp.intranet`
 2. Transformer `appsettings.json` du serveur (variables ACCP)
 3. Déposer `agent.zip` dans `<iis-root>/updates/` *(MAJ auto pour les agents ACCP)*
-4. **Déposer `drop-side/Agent.TrayClient.exe` dans `<iis-root>/updates/side/`** *(Side build)*
+4. **Déposer `drop-test/Agent.TrayClient.exe` dans `<iis-root>/updates/test/`** *(Test build)*
 
 **Variables `Agent.Server/appsettings.json` :**
 
 | Clé | Valeur ACCP |
 |---|---|
-| `Side:HubUrl` | `https://oam-accp.intranet/hub/user` |
-| `Side:EnvironmentName` | `ACCEPTATION` |
-| `Side:UpdatePageUrl` | `https://oam-accp.intranet/side-update` |
+| `Test:HubUrl` | `https://oam-accp.intranet/hub/user` |
+| `Test:EnvironmentName` | `ACCEPTATION` |
+| `Test:UpdatePageUrl` | `https://oam-accp.intranet/test-update` |
 
 **Variables `Agent.Service/appsettings.json` :**
 
@@ -199,7 +199,7 @@ stages:
 | `Agent:UpdateUrl` | `https://oam-accp.intranet/updates/check` |
 | `Agent:PortalUrl` | `https://portail-accp.intranet` |
 
-> Les agents ACCP téléchargent leur Side build via `GET /updates/side/download` — l'`appsettings.json` est généré dynamiquement par le serveur à partir de sa propre configuration.
+> Les agents ACCP téléchargent leur Test build via `GET /updates/test/download` — l'`appsettings.json` est généré dynamiquement par le serveur à partir de sa propre configuration.
 
 ---
 
@@ -212,15 +212,15 @@ stages:
 1. Déployer `drop-server` sur IIS `oam-it.intranet`
 2. Transformer `appsettings.json` du serveur (variables IT)
 3. Déposer `agent.zip` dans `<iis-root>/updates/`
-4. **Déposer `drop-side/Agent.TrayClient.exe` dans `<iis-root>/updates/side/`** *(Side build)*
+4. **Déposer `drop-test/Agent.TrayClient.exe` dans `<iis-root>/updates/test/`** *(Test build)*
 
 **Variables `Agent.Server/appsettings.json` :**
 
 | Clé | Valeur IT |
 |---|---|
-| `Side:HubUrl` | `https://oam-it.intranet/hub/user` |
-| `Side:EnvironmentName` | `IT` |
-| `Side:UpdatePageUrl` | `https://oam-it.intranet/side-update` |
+| `Test:HubUrl` | `https://oam-it.intranet/hub/user` |
+| `Test:EnvironmentName` | `IT` |
+| `Test:UpdatePageUrl` | `https://oam-it.intranet/test-update` |
 
 **Variables `Agent.Service/appsettings.json` :**
 
@@ -246,8 +246,8 @@ stages:
 
 | Clé | Valeur PROD |
 |---|---|
-| `Side:HubUrl` | *(laisser vide — pas de Side en PROD)* |
-| `Side:EnvironmentName` | *(idem)* |
+| `Test:HubUrl` | *(laisser vide — pas de Test en PROD)* |
+| `Test:EnvironmentName` | *(idem)* |
 
 **Variables `Agent.Service/appsettings.json` :**
 
@@ -270,7 +270,7 @@ Utiliser la tâche **FileTransform** (ou `jsonPatch`) pour substituer les valeur
     jsonTargetFiles: '**/appsettings.json'
 ```
 
-Les variables du release pipeline sont automatiquement mappées sur les clés JSON via la notation pointée : `Side.HubUrl`, `Side.EnvironmentName`, etc.
+Les variables du release pipeline sont automatiquement mappées sur les clés JSON via la notation pointée : `Test.HubUrl`, `Test.EnvironmentName`, etc.
 
 > Définir ces variables dans les **variable groups** Azure DevOps par environnement (Library → Variable groups), et lier chaque stage au bon groupe.
 
@@ -296,7 +296,7 @@ Les variables du release pipeline sont automatiquement mappées sur les clés JS
   appsettings.json        ← transformé par le pipeline
   updates/
     agent.zip             ← déposé par le pipeline release
-    side/
+    test/
       Agent.TrayClient.exe  ← déposé par le pipeline release (QA seulement)
 ```
 
@@ -323,7 +323,7 @@ Les variables du release pipeline sont automatiquement mappées sur les clés JS
 ## 6. Checklist de mise en production
 
 - [ ] Build validé en SAT
-- [ ] Tests fonctionnels passés en ACCP (agents avec Side build)
+- [ ] Tests fonctionnels passés en ACCP (agents avec Test build)
 - [ ] Validation IT effectuée
 - [ ] `appsettings.json` PROD validé (URLs, credentials)
 - [ ] Certificat SSL PROD valide et installé

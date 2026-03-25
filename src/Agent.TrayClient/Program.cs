@@ -18,8 +18,8 @@ static class Program
     {
         ApplicationConfiguration.Initialize();
 
-#if SIDE_MODE
-        using var mutex = new Mutex(true, "AgentOAMTray-Side", out bool createdNew);
+#if TEST_MODE
+        using var mutex = new Mutex(true, "AgentOAMTray-Test", out bool createdNew);
 #else
         using var mutex = new Mutex(true, "AgentOAMTray", out bool createdNew);
 #endif
@@ -40,7 +40,7 @@ public class MyTrayContext : ApplicationContext
     private System.Drawing.Icon? _currentIcon;
     // Annulé à chaque changement réseau pour déclencher une reconnexion immédiate
     private CancellationTokenSource _networkChangeCts = new();
-#if SIDE_MODE
+#if TEST_MODE
     private readonly string _envName;
 #endif
 
@@ -54,8 +54,8 @@ public class MyTrayContext : ApplicationContext
 
         var menu = new ContextMenuStrip();
 
-#if SIDE_MODE
-        _envName        = ReadConfigValue("Agent", "EnvironmentName") ?? "Side";
+#if TEST_MODE
+        _envName        = ReadConfigValue("Agent", "EnvironmentName") ?? "Test";
         string userName = $@"{Environment.UserDomainName}\{Environment.UserName}";
 
         var lblEnv  = new ToolStripMenuItem(_envName)         { Enabled = false };
@@ -67,7 +67,7 @@ public class MyTrayContext : ApplicationContext
 
         menu.Items.Add("Ouvrir le portail", null, (s, e) => OpenBrowser("https://mon-portail"));
 
-#if SIDE_MODE
+#if TEST_MODE
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quitter", null, (s, e) => { _cts.Cancel(); Application.Exit(); });
 #endif
@@ -102,8 +102,8 @@ public class MyTrayContext : ApplicationContext
 
             Task.Run(() => ConnectSignalRAsync(_cts.Token));
 
-#if SIDE_MODE
-        Task.Run(() => CheckSideVersionAsync(_cts.Token));
+#if TEST_MODE
+        Task.Run(() => CheckTestVersionAsync(_cts.Token));
 #endif
         }
 
@@ -186,7 +186,7 @@ public class MyTrayContext : ApplicationContext
                 _currentIcon   = newIcon;
                 _trayIcon.Icon = newIcon;
                 _trayIcon.Text = status == ConnectionStatus.Connected
-#if SIDE_MODE
+#if TEST_MODE
                     ? $"Agent OAM [{_envName}] - Connecté"
                     : $"Agent OAM [{_envName}] - Déconnecté";
 #else
@@ -200,15 +200,15 @@ public class MyTrayContext : ApplicationContext
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-#if SIDE_MODE
+#if TEST_MODE
     private static readonly HttpClient _http = new(new HttpClientHandler { UseDefaultCredentials = true });
 
-    private async Task CheckSideVersionAsync(CancellationToken token)
+    private async Task CheckTestVersionAsync(CancellationToken token)
     {
         try
         {
-            string? checkUrl      = ReadConfigValue("Agent", "SideCheckUrl");
-            string? updatePageUrl = ReadConfigValue("Agent", "SideUpdatePageUrl");
+            string? checkUrl      = ReadConfigValue("Agent", "TestCheckUrl");
+            string? updatePageUrl = ReadConfigValue("Agent", "TestUpdatePageUrl");
 
             if (string.IsNullOrEmpty(checkUrl)) return;
 
@@ -232,7 +232,7 @@ public class MyTrayContext : ApplicationContext
 
             _uiInvoker.BeginInvoke(() =>
             {
-                using var form = new SideUpdateForm(_envName, updatePageUrl ?? checkUrl);
+                using var form = new TestUpdateForm(_envName, updatePageUrl ?? checkUrl);
                 form.ShowDialog();
                 _cts.Cancel();
                 Application.Exit();

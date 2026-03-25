@@ -19,9 +19,9 @@ public static class UpdatesEndpoints
     {
         app.MapGet("/updates/check",              Check);
         app.MapGet("/updates/download/{filename}", Download);
-        app.MapGet("/updates/side/check",          SideCheck);
-        app.MapGet("/updates/side/download",      SideDownload);
-        app.MapGet("/updates/side/installer",     SideInstaller);
+        app.MapGet("/updates/test/check",          TestCheck);
+        app.MapGet("/updates/test/download",      TestDownload);
+        app.MapGet("/updates/test/installer",     TestInstaller);
     }
 
     private static IResult Check(HttpContext ctx)
@@ -38,12 +38,12 @@ public static class UpdatesEndpoints
         return Results.Ok(new { hash, downloadUrl });
     }
 
-    private static IResult SideCheck()
+    private static IResult TestCheck()
     {
-        string filePath = Path.Combine(AppContext.BaseDirectory, "updates", "side", "Agent.TrayClient.exe");
+        string filePath = Path.Combine(AppContext.BaseDirectory, "updates", "test", "Agent.TrayClient.exe");
 
         if (!File.Exists(filePath))
-            return Results.NotFound(new { error = "Aucun build side disponible." });
+            return Results.NotFound(new { error = "Aucun build test disponible." });
 
         using var stream = File.OpenRead(filePath);
         string hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
@@ -51,18 +51,18 @@ public static class UpdatesEndpoints
         return Results.Ok(new { hash });
     }
 
-    private static IResult SideDownload(HttpContext ctx, IConfiguration config)
+    private static IResult TestDownload(HttpContext ctx, IConfiguration config)
     {
-        string exePath = Path.Combine(AppContext.BaseDirectory, "updates", "side", "Agent.TrayClient.exe");
+        string exePath = Path.Combine(AppContext.BaseDirectory, "updates", "test", "Agent.TrayClient.exe");
 
         if (!File.Exists(exePath))
-            return Results.NotFound(new { error = "Aucun build side disponible." });
+            return Results.NotFound(new { error = "Aucun build test disponible." });
 
         string baseUrl         = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
-        string hubUrl          = config["Side:HubUrl"]          ?? "";
-        string environmentName = config["Side:EnvironmentName"] ?? "";
-        string updatePageUrl   = config["Side:UpdatePageUrl"]   ?? $"{baseUrl}/side-update";
-        string checkUrl        = $"{baseUrl}/updates/side/check";
+        string hubUrl          = config["Test:HubUrl"]          ?? "";
+        string environmentName = config["Test:EnvironmentName"] ?? "";
+        string updatePageUrl   = config["Test:UpdatePageUrl"]   ?? $"{baseUrl}/test-update";
+        string checkUrl        = $"{baseUrl}/updates/test/check";
 
         var appSettings = new
         {
@@ -70,8 +70,8 @@ public static class UpdatesEndpoints
             {
                 HubUrl            = hubUrl,
                 EnvironmentName   = environmentName,
-                SideCheckUrl      = checkUrl,
-                SideUpdatePageUrl = updatePageUrl,
+                TestCheckUrl      = checkUrl,
+                TestUpdatePageUrl = updatePageUrl,
             }
         };
 
@@ -95,27 +95,27 @@ public static class UpdatesEndpoints
         }
 
         zipStream.Position = 0;
-        return Results.File(zipStream, "application/zip", "AgentOAM-Side.zip");
+        return Results.File(zipStream, "application/zip", "AgentOAM-Test.zip");
     }
 
-    private static IResult SideInstaller(HttpContext ctx, IConfiguration config)
+    private static IResult TestInstaller(HttpContext ctx, IConfiguration config)
     {
-        string exePath = Path.Combine(AppContext.BaseDirectory, "updates", "side", "Agent.TrayClient.exe");
+        string exePath = Path.Combine(AppContext.BaseDirectory, "updates", "test", "Agent.TrayClient.exe");
         if (!File.Exists(exePath))
-            return Results.NotFound(new { error = "Aucun build side disponible." });
+            return Results.NotFound(new { error = "Aucun build test disponible." });
 
         string baseUrl         = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
-        string environmentName = config["Side:EnvironmentName"] ?? "";
-        string downloadUrl     = $"{baseUrl}/updates/side/download";
+        string environmentName = config["Test:EnvironmentName"] ?? "";
+        string downloadUrl     = $"{baseUrl}/updates/test/download";
         string installDir      = string.IsNullOrEmpty(environmentName)
-            ? @"C:\ProgramData\OAM-Side"
-            : $@"C:\ProgramData\OAM-Side\{environmentName}";
+            ? @"C:\ProgramData\OAM-Test"
+            : $@"C:\ProgramData\OAM-Test\{environmentName}";
         string exeFileName     = string.IsNullOrEmpty(environmentName)
             ? "Agent.TrayClient.exe"
             : $"Agent.TrayClient.{environmentName}.exe";
 
         string script = $$"""
-            # Installateur Agent OAM - mode Side ({{environmentName}})
+            # Installateur Agent OAM - mode Test ({{environmentName}})
             # Genere automatiquement par le serveur - ne pas modifier
 
             $ErrorActionPreference = 'Stop'
@@ -123,7 +123,7 @@ public static class UpdatesEndpoints
             $downloadUrl = '{{downloadUrl}}'
             $exeName     = '{{exeFileName}}'
 
-            Write-Host "Installation de l'Agent OAM ({{environmentName}})..." -ForegroundColor Cyan
+            Write-Host "Installation de l'Agent OAM - mode Test ({{environmentName}})..." -ForegroundColor Cyan
 
             # Creer le repertoire si necessaire
             if (-not (Test-Path $installDir)) {
@@ -142,7 +142,7 @@ public static class UpdatesEndpoints
             }
 
             # Telecharger le ZIP
-            $zipPath = Join-Path $env:TEMP 'AgentOAM-Side.zip'
+            $zipPath = Join-Path $env:TEMP 'AgentOAM-Test.zip'
             Write-Host "Telechargement depuis $downloadUrl ..."
             $client = New-Object System.Net.WebClient
             $client.UseDefaultCredentials = $true
@@ -156,8 +156,8 @@ public static class UpdatesEndpoints
 
             # Creer un raccourci sur le bureau
             $exePath      = Join-Path $installDir $exeName
-            $shortcutPath = Join-Path $env:USERPROFILE "Desktop\Agent OAM - {{environmentName}}.lnk"
             $shell        = New-Object -ComObject WScript.Shell
+            $shortcutPath = Join-Path $shell.SpecialFolders('Desktop') "Agent OAM - {{environmentName}}.lnk"
             $shortcut     = $shell.CreateShortcut($shortcutPath)
             $shortcut.TargetPath       = $exePath
             $shortcut.WorkingDirectory = $installDir
@@ -176,7 +176,7 @@ public static class UpdatesEndpoints
 
         byte[] scriptBytes = Encoding.UTF8.GetBytes(script);
         string fileName    = string.IsNullOrEmpty(environmentName)
-            ? "Install-AgentOAM.ps1"
+            ? "Install-AgentOAM-Test.ps1"
             : $"Install-AgentOAM-{environmentName}.ps1";
 
         return Results.File(scriptBytes, "application/octet-stream", fileName);

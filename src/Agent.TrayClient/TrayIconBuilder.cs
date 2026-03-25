@@ -1,6 +1,6 @@
 // TrayIconBuilder.cs
 // Construit l'icône du tray avec un point de statut (vert = connecté, rouge = déconnecté).
-// En mode SIDE_MODE, l'icône de base est teintée en rouge/orange pour distinguer du build prod.
+// En mode TEST_MODE, l'icône de base est teintée en rouge/orange pour distinguer du build prod.
 // L'icône de base est chargée depuis la ressource embarquée Resources/tray-base.png.
 using System;
 using System.Drawing;
@@ -64,7 +64,7 @@ internal static class TrayIconBuilder
         // Icône de base redimensionnée à 32x32
         if (baseImg is not null)
         {
-#if SIDE_MODE
+#if TEST_MODE
             g.DrawImage(TintRed(baseImg), 0, 0, 32, 32);
 #else
             g.DrawImage(baseImg, 0, 0, 32, 32);
@@ -93,10 +93,10 @@ internal static class TrayIconBuilder
         return icon;
     }
 
-    // ── Teinte rouge (mode Side) ─────────────────────────────────────────────
+    // ── Teinte rouge (mode Test) ─────────────────────────────────────────────
 
-#if SIDE_MODE
-    /// <summary>Applique une teinte rouge à l'image de base pour distinguer visuellement le mode Side.</summary>
+#if TEST_MODE
+    /// <summary>Applique une teinte rouge à l'image de base pour distinguer visuellement le mode Test.</summary>
     private static Bitmap TintRed(Bitmap src)
     {
         var tinted = new Bitmap(src.Width, src.Height);
