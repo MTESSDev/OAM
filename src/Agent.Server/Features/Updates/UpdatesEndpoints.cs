@@ -75,10 +75,14 @@ public static class UpdatesEndpoints
 
         string appSettingsJson = JsonSerializer.Serialize(appSettings, new JsonSerializerOptions { WriteIndented = true });
 
+        string exeFileName = string.IsNullOrEmpty(environmentName)
+            ? "Agent.TrayClient.exe"
+            : $"Agent.TrayClient.{environmentName}.exe";
+
         var zipStream = new MemoryStream();
         using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            var exeEntry = archive.CreateEntry("Agent.TrayClient.exe", CompressionLevel.NoCompression);
+            var exeEntry = archive.CreateEntry(exeFileName, CompressionLevel.NoCompression);
             using (var entryStream = exeEntry.Open())
             using (var fileStream  = File.OpenRead(exePath))
                 fileStream.CopyTo(entryStream);

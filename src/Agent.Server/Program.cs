@@ -27,6 +27,8 @@ Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "updates"));
 app.UseSwagger();
 app.UseSwaggerUI();
 app.UseHttpsRedirection();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 

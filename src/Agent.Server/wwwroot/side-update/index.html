@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Agent OAM – Mise à jour requise</title>
+
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/open-sans-v18-latin-regular.woff2" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/open-sans-v18-latin-600.woff2" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/open-sans-v18-latin-700.woff2" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/roboto-v20-latin-regular.woff2" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/roboto-v20-latin-500.woff2" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" as="font" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/fonts/roboto-v20-latin-700.woff2" type="font/woff2" crossorigin="anonymous">
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/css/utd-webcomponents.min.css">
+</head>
+<body>
+  <noscript>JavaScript doit être activé pour afficher cette page correctement.</noscript>
+
+  <div class="utd-conteneur-principal">
+    <header>
+      <utd-piv-entete
+        id="pivEntete"
+        titre-site1="Agent OAM"
+        alt-logo="Signature du gouvernement du Québec. Accédez à Agent OAM.">
+      </utd-piv-entete>
+    </header>
+
+    <div class="utd-container">
+      <main id="main">
+        <h1>Mise à jour de l'Agent OAM (mode test)</h1>
+
+        <utd-avis
+          type="avertissement"
+          titre="Votre version de l'agent n'est plus à jour."
+          contenu="Une nouvelle version est disponible. Vous devez la télécharger et remplacer votre ancienne version avant de continuer à tester.">
+        </utd-avis>
+
+        <h2 class="mt-48">Télécharger la nouvelle version</h2>
+
+        <p>Cliquez sur le bouton ci-dessous pour télécharger le fichier ZIP contenant la nouvelle version de l'agent ainsi que sa configuration pour votre environnement.</p>
+
+        <p>
+          <a href="/updates/side/download" class="utd-btn primaire">
+            Télécharger AgentOAM-Side.zip
+          </a>
+        </p>
+
+        <h2 class="mt-48">Étapes d'installation</h2>
+
+        <ol>
+          <li class="mb-16">
+            <strong>Fermer l'agent actuel</strong><br>
+            Faites un clic droit sur l'icône de l'agent dans la barre des tâches (en bas à droite) et cliquez sur <strong>Quitter</strong>.
+          </li>
+          <li class="mb-16">
+            <strong>Extraire le ZIP téléchargé</strong><br>
+            Clic droit sur <code class="utd-emphase-gris">AgentOAM-Side.zip</code> → <strong>Extraire tout…</strong><br>
+            Choisissez un dossier fixe sur votre poste pour le déployer.
+            <utd-avis
+              type="information"
+              titre="Même dossier à chaque mise à jour"
+              contenu="Toujours extraire au même endroit et écraser les fichiers existants — cela garantit que le raccourci fonctionne encore après la mise à jour."
+              class="mt-16">
+            </utd-avis>
+          </li>
+          <li class="mb-16">
+            <strong>Lancer le nouvel agent</strong><br>
+            Double-cliquez sur l'exécutable dans le dossier extrait. Son nom contient le nom de votre environnement, par exemple :<br>
+            <code class="utd-emphase-gris">Agent.TrayClient.ACCEPTATION.exe</code>
+          </li>
+          <li class="mb-16">
+            <strong>Vérifier l'icône dans la barre des tâches</strong><br>
+            L'agent apparaît avec une icône rouge (mode test). La couleur du point indique l'état de la connexion :
+            <ul class="mt-16">
+              <li><utd-pastille couleur="vert" class="mr-8"></utd-pastille> <strong>Point vert</strong> — connecté au serveur</li>
+              <li><utd-pastille couleur="rouge" class="mr-8"></utd-pastille> <strong>Point rouge</strong> — déconnecté (réseau, VPN, serveur indisponible)</li>
+            </ul>
+          </li>
+        </ol>
+
+        <utd-avis
+          type="complementaire"
+          sous-type="astuce"
+          titre="Une seule instance à la fois"
+          contenu="Si vous tentez de lancer l'agent une deuxième fois alors qu'il est déjà actif, rien ne se passera — c'est normal. Quittez d'abord l'instance en cours via le menu clic droit."
+          class="mt-32">
+        </utd-avis>
+
+        <h2 class="mt-48">Première installation ?</h2>
+
+        <p>Si c'est la première fois que vous installez l'agent, consultez le <a href="/side-download">guide d'installation complet</a> pour les étapes détaillées, les emplacements recommandés et la création d'un raccourci.</p>
+
+        <h2 class="mt-48">Besoin d'aide ?</h2>
+
+        <p>Contactez l'équipe de développement SPFS.</p>
+
+      </main>
+    </div>
+  </div>
+
+  <utd-hautpage id="hautPage"></utd-hautpage>
+
+  <footer class="utd">
+    <utd-pied-page-site id="piedPageSite"></utd-pied-page-site>
+    <utd-piv-pied-page id="pivPiedPage">
+      <div slot="liens">
+        <ul>
+          <li><a href="/swagger">API Swagger</a></li>
+        </ul>
+      </div>
+    </utd-piv-pied-page>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/gh/MTESSDev/utd-webcomponents@4.1.0/dist/js/utd-webcomponents.min.js"></script>
+  <script>
+    utd.ajusterAccessibiliteLiens();
+  </script>
+</body>
+</html>
