@@ -3,7 +3,7 @@
 
 Description:
 
-OAM est un système autoportant qui permet d'orchestrer des tâches de simple à complexe, des 
+OAM est un système autoportant qui permet d'orchestrer des tâches de simple à complexe, de faire le suivi en temps réel, de faire l'assurance qualité et de configurer via des déploiement azure devops et des endpoints et aussi en partie via une interface fluide et simple à utiliser.
 ---
 
 ## 1. Infrastructure & Déploiement
