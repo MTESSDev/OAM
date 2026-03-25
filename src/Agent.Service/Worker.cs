@@ -185,6 +185,28 @@ public class MainWorker : BackgroundService
         return target - now;
     }
 
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await base.StopAsync(cancellationToken);
+
+        foreach (var proc in Process.GetProcessesByName("Agent.TrayClient"))
+        {
+            try
+            {
+                proc.Kill();
+                _logger.LogInformation("Agent.TrayClient (PID {Pid}) arrêté avec le service.", proc.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Impossible d'arrêter Agent.TrayClient (PID {Pid}).", proc.Id);
+            }
+            finally
+            {
+                proc.Dispose();
+            }
+        }
+    }
+
     public override void Dispose()
     {
         _http.Dispose();

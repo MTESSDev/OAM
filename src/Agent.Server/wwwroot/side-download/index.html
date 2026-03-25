@@ -40,17 +40,17 @@
         <utd-avis
           type="information"
           titre="Aucun droit administrateur requis"
-          contenu="L'agent en mode test ne s'installe pas comme service Windows. Il suffit de télécharger, extraire et lancer l'exécutable."
+          contenu="L'agent en mode test ne s'installe pas comme service Windows. Il suffit de télécharger et lancer le script d'installation."
           class="mt-16 mb-32">
         </utd-avis>
 
-        <h2>Télécharger l'agent</h2>
+        <h2>Télécharger et installer</h2>
 
-        <p>Le fichier ZIP contient l'exécutable de l'agent ainsi que sa configuration pour votre environnement de test.</p>
+        <p>Le script télécharge automatiquement l'agent, l'installe dans <code class="utd-emphase-gris">C:\ProgramData\OAM-Side\ACCEPTATION\</code>, crée un raccourci sur votre bureau et démarre l'agent.</p>
 
         <p>
-          <a href="/updates/side/download" class="utd-btn primaire">
-            Télécharger AgentOAM-Side.zip
+          <a href="/updates/side/installer" class="utd-btn primaire">
+            Télécharger l'installateur (PowerShell)
           </a>
         </p>
 
@@ -58,31 +58,20 @@
 
         <ol>
           <li class="mb-16">
-            <strong>Extraire le ZIP</strong><br>
-            Clic droit sur <code class="utd-emphase-gris">AgentOAM-Side.zip</code> → <strong>Extraire tout…</strong><br>
-            Extrayez dans <code class="utd-emphase-gris">C:\ProgramData\OAM-Side\</code><br>
-            <span class="utd-text-sm">ProgramData est un dossier système partagé entre tous les comptes Windows. Il peut être caché dans l'Explorateur — copiez le chemin directement dans la barre d'adresse et appuyez sur Entrée.</span>
-            <utd-avis
-              type="avertissement"
-              titre="Ne pas extraire dans votre répertoire utilisateur"
-              contenu="Évitez les dossiers sous C:\Users\... (Bureau, Documents, Téléchargements, etc.). Ces emplacements ne sont pas accessibles par les autres comptes Windows — la fonctionnalité « Exécuter en tant qu'autre utilisateur » ne fonctionnerait pas."
-              class="mt-16">
-            </utd-avis>
+            <strong>Lancer le script</strong><br>
+            Clic droit sur <code class="utd-emphase-gris">Install-AgentOAM-ACCEPTATION.ps1</code>
+            → <strong>Exécuter avec PowerShell</strong><br>
+            Le script s'occupe de tout : téléchargement, extraction et création du raccourci sur le bureau.
             <utd-avis
               type="information"
-              titre="Gardez ce dossier pour les mises à jour futures"
-              contenu="Lors des prochaines mises à jour, extrayez le nouveau ZIP au même endroit en écrasant les fichiers existants."
+              titre="Mises à jour futures"
+              contenu="Pour mettre à jour, relancez simplement le même script — il arrête l'agent en cours, remplace les fichiers et met à jour le raccourci."
               class="mt-16">
             </utd-avis>
-          </li>
-          <li class="mb-16">
-            <strong>Lancer l'agent</strong><br>
-            Dans le dossier extrait, double-cliquez sur l'exécutable. Son nom contient le nom de votre environnement, par exemple :<br>
-            <code class="utd-emphase-gris">Agent.TrayClient.ACCEPTATION.exe</code>
           </li>
           <li class="mb-16">
             <strong>Vérifier la présence de l'icône</strong><br>
-            Une icône apparaît dans la zone de notification (en bas à droite de l'écran, près de l'horloge).
+            Une icône rouge apparaît dans la zone de notification (en bas à droite, près de l'horloge).
             Si elle n'est pas visible, cliquez sur la flèche <strong>∧</strong> pour afficher les icônes cachées.
             <ul class="mt-16">
               <li><utd-pastille couleur="vert" class="mr-8"></utd-pastille> <strong>Point vert</strong> — connecté au serveur</li>
@@ -97,26 +86,6 @@
           </li>
         </ol>
 
-        <h2 class="mt-48">Créer un raccourci</h2>
-
-        <p>Pour retrouver facilement l'agent ou le relancer sans naviguer dans l'Explorateur :</p>
-        <ol>
-          <li class="mb-16">
-            Naviguez jusqu'à <code class="utd-emphase-gris">C:\ProgramData\OAM-Side\</code> dans l'Explorateur Windows
-          </li>
-          <li class="mb-16">
-            Clic droit sur l'exécutable (ex. <code class="utd-emphase-gris">Agent.TrayClient.ACCEPTATION.exe</code>)
-            → <strong>Envoyer vers</strong> → <strong>Bureau (créer un raccourci)</strong>
-          </li>
-        </ol>
-
-        <utd-avis
-          type="information"
-          titre="Raccourci valide pour tous les comptes"
-          contenu="Puisque l'exe est dans ProgramData, le raccourci fonctionnera aussi bien sous votre compte que via « Exécuter en tant qu'autre utilisateur »."
-          class="mt-16 mb-32">
-        </utd-avis>
-
         <h2 class="mt-48">Lancer l'agent en tant qu'un utilisateur de test</h2>
 
         <p>
@@ -126,7 +95,7 @@
 
         <ol>
           <li class="mb-16">
-            Dans l'Explorateur Windows, naviguez jusqu'au dossier d'extraction choisi
+            Dans l'Explorateur Windows, naviguez jusqu'à <code class="utd-emphase-gris">C:\ProgramData\OAM-Side\ACCEPTATION\</code>
           </li>
           <li class="mb-16">
             Maintenez la touche <kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 5px;">Maj</kbd> enfoncée,

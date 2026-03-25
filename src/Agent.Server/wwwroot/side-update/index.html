@@ -38,44 +38,23 @@
 
         <h2 class="mt-48">Télécharger la nouvelle version</h2>
 
-        <p>Cliquez sur le bouton ci-dessous pour télécharger le fichier ZIP contenant la nouvelle version de l'agent ainsi que sa configuration pour votre environnement.</p>
+        <p>Téléchargez le script ci-dessous, puis lancez-le. Il arrête l'agent en cours, remplace les fichiers, met à jour le raccourci sur votre bureau et redémarre automatiquement.</p>
 
         <p>
-          <a href="/updates/side/download" class="utd-btn primaire">
-            Télécharger AgentOAM-Side.zip
+          <a href="/updates/side/installer" class="utd-btn primaire">
+            Télécharger l'installateur (PowerShell)
           </a>
         </p>
 
-        <h2 class="mt-48">Étapes d'installation</h2>
+        <h2 class="mt-48">Étapes</h2>
 
         <ol>
           <li class="mb-16">
-            <strong>Fermer l'agent actuel</strong><br>
-            Faites un clic droit sur l'icône de l'agent dans la barre des tâches (en bas à droite) et cliquez sur <strong>Quitter</strong>.
+            Clic droit sur <code class="utd-emphase-gris">Install-AgentOAM-ACCEPTATION.ps1</code>
+            → <strong>Exécuter avec PowerShell</strong>
           </li>
           <li class="mb-16">
-            <strong>Extraire le ZIP téléchargé</strong><br>
-            Clic droit sur <code class="utd-emphase-gris">AgentOAM-Side.zip</code> → <strong>Extraire tout…</strong><br>
-            Choisissez un dossier fixe sur votre poste pour le déployer.
-            <utd-avis
-              type="information"
-              titre="Même dossier à chaque mise à jour"
-              contenu="Toujours extraire au même endroit et écraser les fichiers existants — cela garantit que le raccourci fonctionne encore après la mise à jour."
-              class="mt-16">
-            </utd-avis>
-          </li>
-          <li class="mb-16">
-            <strong>Lancer le nouvel agent</strong><br>
-            Double-cliquez sur l'exécutable dans le dossier extrait. Son nom contient le nom de votre environnement, par exemple :<br>
-            <code class="utd-emphase-gris">Agent.TrayClient.ACCEPTATION.exe</code>
-          </li>
-          <li class="mb-16">
-            <strong>Vérifier l'icône dans la barre des tâches</strong><br>
-            L'agent apparaît avec une icône rouge (mode test). La couleur du point indique l'état de la connexion :
-            <ul class="mt-16">
-              <li><utd-pastille couleur="vert" class="mr-8"></utd-pastille> <strong>Point vert</strong> — connecté au serveur</li>
-              <li><utd-pastille couleur="rouge" class="mr-8"></utd-pastille> <strong>Point rouge</strong> — déconnecté (réseau, VPN, serveur indisponible)</li>
-            </ul>
+            Le script s'occupe du reste — lancez ensuite l'agent via le raccourci sur votre bureau.
           </li>
         </ol>
 
