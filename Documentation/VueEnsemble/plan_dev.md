@@ -176,8 +176,8 @@ Voici le tableau en format Markdown brut :
 | Base de données | SQL Server + EF Core |
 | Temps réel | SignalR |
 | Déploiement | Azure DevOps → IIS Windows on-prem |
-| Config | YAML (`workflow.yml`, `specs.yml`) |
-| HTTP sortant | `anisite/yamlhttpclient` |
+| HTTP sortant | UNIQUEMENT avec `anisite/yamlhttpclient` |
 | Assertions/Tests | `mtessdev/mdat` |
+| Assertions/Tests/LIVE QA | `mtessdev/mdat` |
 
 
