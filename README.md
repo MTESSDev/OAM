@@ -53,11 +53,14 @@ Le service vérifie une fois au démarrage puis chaque nuit (entre 1h et 6h, heu
 
 Le `Agent.TrayClient` peut être compilé en configuration **Test** (`--configuration Test`) pour les agents de QA ou les développeurs qui travaillent sur un environnement séparé.
 
-- Icône rouge (distincte de la prod)
-- Nom de l'environnement et utilisateur affichés dans le menu
-- Option "Quitter" disponible
-- Vérification de version au démarrage — bloque l'utilisation si le build n'est plus à jour
-- Distribué via `GET /updates/test/download` : génère un ZIP à la volée avec l'exe et l'`appsettings.json` pré-configuré pour l'environnement
+| Caractéristique | Version PROD | Version DEV |
+| :--- | :--- | :--- |
+| **Mode de lancement** | Automatique (Au démarrage de la session / Service Windows) | Manuel (Distribué via `GET /updates/test/download` : génère un ZIP à la volée avec l'exe et l'`appsettings.json` pré-configuré pour l'environnement) |
+| **Privilèges** | Exécution avec les droits système standards | "Run as" (pour simuler différents utilisateurs) |
+| **Persistance** | Verrouillé (Impossible à fermer par l'utilisateur) | Fermeture autorisée (Option "Quitter" disponible) |
+| **Mises à jour** | Automatiques et transparentes | Manuelles - Vérification de version au démarrage — bloque l'utilisation si le build n'est plus à jour |
+| **Couleur de l'icône** | Bleu | Rouge |
+| **Menu contextuel (Clic droit)** | Aucune information affichée dans le menu | Nom de l'environnement et utilisateur affichés dans le menu |
 
 ## Structure du dépôt
 
