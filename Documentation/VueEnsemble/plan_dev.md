@@ -183,7 +183,7 @@ Voici le tableau en format Markdown brut :
 
 ## 8. Skills supplémentaires
 
-- UTD
-- mdat
-- yamlHttpClient
+- UTD : https://raw.githubusercontent.com/MTESSDev/skills/refs/heads/main/skills/UTD/SKILL.md
+- mdat : https://raw.githubusercontent.com/MTESSDev/skills/refs/heads/main/skills/mDAT/SKILL.md
+- yamlHttpClient : https://raw.githubusercontent.com/MTESSDev/skills/refs/heads/main/skills/YamlHttpClient/SKILL.md
 
